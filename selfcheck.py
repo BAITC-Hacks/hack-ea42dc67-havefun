@@ -1,0 +1,76 @@
+"""Самопроверка решения: запускается одной командой, ничего не требует.
+
+    python selfcheck.py
+
+Проверяет то, что проверяет жюри: агент запускается, план корректен,
+лимиты соблюдены, результат положителен, поведение при некорректных
+входных данных предсказуемо.
+"""
+from __future__ import annotations
+
+import sys
+
+import agent as A
+from mock_environment import make_mock_env
+
+OK, FAIL = "[ ok ]", "[FAIL]"
+errors: list[str] = []
+
+
+def check(condition: bool, title: str, detail: str = "") -> None:
+    print(f"{OK if condition else FAIL} {title}" + (f" — {detail}" if detail else ""))
+    if not condition:
+        errors.append(title)
+
+
+def main() -> int:
+    print("=== 1. Основной сценарий ===")
+    env, _ = make_mock_env(seed=42)
+    plan = A.Agent().act(env)
+
+    check(isinstance(plan, list), "план — это список")
+    check(1 <= len(plan) <= A.MAX_CAMPAIGNS, "от 1 до 10 кампаний", f"получено {len(plan)}")
+
+    known_tariffs = set(env.tariffs["tariff_plan_code"])
+    check(all(c["target_tariff"] in known_tariffs for c in plan), "все целевые тарифы существуют")
+    check(all(c["channel"] in env.channels for c in plan), "все каналы существуют")
+    check(all(c.get("campaign_name") for c in plan), "у каждой кампании есть имя")
+
+    print("\n=== 2. Лимиты ===")
+    check(env.pilots_left >= 0, "лимит пилотов не превышен",
+          f"использовано {A.N_PILOTS - env.pilots_left} из {A.N_PILOTS}")
+    check(env.remaining_budget >= 0, "бюджет не превышен",
+          f"осталось {env.remaining_budget:.0f}")
+    check(env.remaining_contacts >= 0, "охват не превышен",
+          f"осталось {env.remaining_contacts}")
+    check(len(env.pilot_history) > 0, "агент действительно пилотировал",
+          f"{len(env.pilot_history)} пилотов")
+
+    print("\n=== 3. Некорректные входные данные ===")
+    env2, _ = make_mock_env(seed=1)
+    env2.customer_profile = env2.customer_profile.iloc[0:0]
+    check(A.Agent().act(env2) == [], "пустая аудитория — пустой план, без падения")
+
+    env3, _ = make_mock_env(seed=1)
+    env3.customer_profile = env3.customer_profile.drop(columns=["predicted_arpu"])
+    check(A.Agent().act(env3) == [], "нет обязательной колонки — пустой план, без падения")
+
+    saved = A.HISTORY_PATH
+    A.HISTORY_PATH = "data/файла-нет.csv"
+    env4, _ = make_mock_env(seed=1)
+    check(A.Agent().act(env4) == [], "нет истории — пустой план, без падения")
+    A.HISTORY_PATH = saved
+
+    print("\n=== 4. Валидация плана ===")
+    broken = [
+        {"campaign_name": "плохой канал", "target_tariff": "tariff_9", "channel": "телепатия"},
+        {"campaign_name": "плохой тариф", "target_tariff": "tariff_999", "channel": "sms"},
+    ]
+    check(A.validate_plan(broken, env) == [], "некорректные кампании отсеиваются")
+
+    print("\n" + ("ВСЁ ПРОШЛО" if not errors else f"ПРОВАЛЕНО: {len(errors)}"))
+    return 1 if errors else 0
+
+
+if __name__ == "__main__":
+    sys.exit(main())

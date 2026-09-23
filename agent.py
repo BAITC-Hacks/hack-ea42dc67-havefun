@@ -1,0 +1,411 @@
+"""Агент управления тарифными маркетинговыми кампаниями.
+
+Стратегия в трёх шагах.
+
+1. ПРИОР. По истории смен тарифа (`data/change_tariff.csv`) считаем медианный
+   относительный прирост ARPU в разрезе «ARPU-сегмент × целевой тариф».
+   Главное наблюдение: эффект определяется сегментом абонента, а не парой
+   тарифов — LOW +1.55, MID +0.15, HIGH -0.12. Это возврат к среднему.
+   HIGH при этом составляет 59% базы, поэтому агент, максимизирующий охват,
+   неизбежно уходит в минус. История описывает другую выборку, поэтому приор
+   задаёт только порядок проверки гипотез.
+
+2. РАЗВЕДКА. Пилотируем гипотезы каналом `push`: он стоит 0 у.е. за контакт,
+   поэтому разведка не тратит бюджет, только охват. Наблюдение пересчитывается
+   на любой канал, потому что множитель входит в формулу линейно:
+       lift_ratio = arpu_change_pct * min(conversion * multiplier, 1)
+   Отсюда conversion * arpu_change_pct ~= observed_push / 0.5.
+
+3. ОТБОР. Гипотеза проходит, если нижняя граница оценки (среднее минус запас
+   на шум) положительна. Подтверждённый вывод переносится на весь сегмент,
+   а уверенно отрицательные исходные тарифы исключаются поимённо. Бюджет
+   распределяется по эффективности апгрейда канала: охват ограничен жёстче,
+   чем деньги, поэтому дешёвый sms на многих выгоднее звонка на немногих.
+
+Внешние сервисы не используются: агент работает офлайн и детерминированно.
+"""
+from __future__ import annotations
+
+import os
+
+import numpy as np
+import pandas as pd
+
+# ── Константы среды (из scoring_core.py) ──────────────────────────────────
+CHANNELS = {
+    "push":        {"cost": 0,   "mult": 0.50},
+    "sms":         {"cost": 4,   "mult": 0.65},
+    "digital_ads": {"cost": 22,  "mult": 0.85},
+    "call":        {"cost": 160, "mult": 1.20},
+}
+MAX_CAMPAIGNS = 10
+MAX_PER_CAMPAIGN = 5000
+PER_CUSTOMER_STD = 0.804        # шум пилота = STD / sqrt(n)
+
+# ── Параметры стратегии ───────────────────────────────────────────────────
+N_PILOTS = 20                   # лимит среды
+PILOT_SIZE = 200                # максимум: шум минимален (0.804/√200 ≈ 0.057)
+PILOT_CHANNEL = "push"          # бесплатно по деньгам
+TARGETS_PER_GROUP = 1           # сколько целевых тарифов проверяем на группу
+MIN_HISTORY_ROWS = 30           # минимум наблюдений в истории для приора
+CONFIDENCE_Z = 1.0              # запас на шум при отборе
+# Переносить ли подтверждённый вывод на непилотированные исходные тарифы
+# внутри сегмента. True — больше охват, выше риск; False — только измеренное.
+TRANSFER_TO_SEGMENT = os.environ.get('TRANSFER_TO_SEGMENT', '1') == '1'
+HISTORY_PATH = os.path.join("data", "change_tariff.csv")
+
+
+# ── Шаг 1. Приор по истории ───────────────────────────────────────────────
+def build_prior() -> pd.DataFrame:
+    """Медианный относительный прирост ARPU по паре «сегмент → целевой тариф».
+
+    Возвращает пустой DataFrame, если истории нет или она непригодна —
+    тогда агент вернёт пустой план вместо случайного: ноль лучше убытка.
+    """
+    try:
+        hist = pd.read_csv(HISTORY_PATH)
+    except Exception as exc:  # noqa: BLE001 — отсутствие истории не должно ронять агента
+        print(f"[prior] история недоступна ({type(exc).__name__}), работаем без приора")
+        return pd.DataFrame(columns=["tariff_plan_code_from", "tariff_plan_code_to", "prior", "n"])
+
+    hist = hist[hist["AVG_ARPU_PREV_3M"] > 0].copy()
+    hist["rel"] = (hist["AVG_ARPU_NEXT_3M"] - hist["AVG_ARPU_PREV_3M"]) / hist["AVG_ARPU_PREV_3M"]
+
+    # Главный вывод из истории: эффект определяется ARPU-сегментом, а не
+    # парой тарифов. Медианный относительный прирост:
+    #     LOW  +1.55   MID  +0.15   HIGH  -0.12
+    # Это возврат к среднему: дешёвые абоненты после смены тарифа начинают
+    # платить больше, дорогие — меньше. Поэтому приор строим по паре
+    # «сегмент × целевой тариф», а пороги сегментов берём те же, что в
+    # customer_profile.csv (ARPU_3m_avg: <1000 LOW, 1000-5000 MID, >5000 HIGH).
+    hist["arpu_segment"] = pd.cut(hist["AVG_ARPU_PREV_3M"],
+                                  [-np.inf, 1000, 5000, np.inf],
+                                  labels=["LOW", "MID", "HIGH"])
+    prior = (hist.groupby(["arpu_segment", "tariff_plan_code_to"], observed=True)["rel"]
+                 .agg(["median", "size"])
+                 .reset_index()
+                 .rename(columns={"median": "lift", "size": "n"}))
+
+    # Эффект кампании — это не сам прирост, а прирост, умноженный на долю
+    # абонентов, которые действительно перейдут:
+    #     lift_ratio = arpu_change_pct * conversion_rate * channel_multiplier
+    # Частоту перехода в истории используем как оценку конверсии, поэтому
+    # ранжируем цели по произведению, а не по одному приросту. На наших
+    # данных верхний выбор совпадает, но при другой модели эффектов
+    # ожидаемая ценность — более правильный критерий, чем условный прирост.
+    totals = hist.groupby("arpu_segment", observed=True).size().rename("total")
+    prior = prior.merge(totals, on="arpu_segment", how="left")
+    prior["share"] = prior["n"] / prior["total"]
+    prior["prior"] = prior["lift"] * prior["share"]
+    return prior[prior["n"] >= MIN_HISTORY_ROWS]
+
+
+# ── Шаг 2. Кандидаты ──────────────────────────────────────────────────────
+def build_candidates(profile: pd.DataFrame, prior: pd.DataFrame) -> list[dict]:
+    """Гипотезы для разведки: (текущий тариф, ARPU-сегмент) → целевой тариф.
+
+    Группы по паре «current_tariff + arpu_segment» не пересекаются, поэтому
+    пилоты меряют непересекающиеся куски базы. Целевой тариф выбирается по
+    приору сегмента, а гипотезы упорядочиваются по ожидаемой ценности
+    «эффект × охват × средний ARPU»: пилотов всего 20, и тратить их нужно
+    на то, что даст наибольший вклад в результат.
+    """
+    groups = (profile.groupby(["current_tariff", "arpu_segment"])
+                     .agg(size=("ID_NUMBER", "size"), arpu=("predicted_arpu", "mean"))
+                     .reset_index())
+    groups = groups[groups["size"] >= 50]
+    if groups.empty:
+        return []
+
+    if prior.empty:
+        return []
+
+    # лучшие целевые тарифы для каждого ARPU-сегмента
+    targets_by_seg: dict[str, list[tuple[str, float]]] = {}
+    for seg, sub in prior.groupby("arpu_segment", observed=True):
+        sub = sub[sub["prior"] > 0].sort_values("prior", ascending=False)
+        targets_by_seg[str(seg)] = list(zip(sub["tariff_plan_code_to"], sub["prior"]))
+
+    cands = []
+    for _, r in groups.iterrows():
+        seg = str(r["arpu_segment"])
+        for target, p in targets_by_seg.get(seg, [])[:TARGETS_PER_GROUP]:
+            if target == r["current_tariff"]:
+                continue
+            cands.append({
+                "current_tariff": r["current_tariff"],
+                "arpu_segment": seg,
+                "target_tariff": target,
+                "size": int(r["size"]),
+                "arpu": float(r["arpu"]),
+                "prior": float(p),
+            })
+
+    # ожидаемая ценность гипотезы: эффект × охват × средний ARPU.
+    # Сегменты с отрицательным приором (HIGH) сюда не попадают вовсе —
+    # именно на них наивный агент, гоняющийся за охватом, теряет деньги.
+    cands.sort(key=lambda c: -c["prior"] * min(c["size"], MAX_PER_CAMPAIGN) * c["arpu"])
+    return cands
+
+
+# ── Шаг 3. Экономика канала ───────────────────────────────────────────────
+def allocate_channels(plan: list[dict], budget: float) -> None:
+    """Распределяет бюджет по кампаниям, меняя канал на месте.
+
+    Охват ограничен жёстче, чем деньги: 15 000 контактов против 100 000 у.е.
+    Поэтому побеждает не самый сильный канал на абонента, а самый выгодный
+    на единицу бюджета. Апгрейды по эффективности Δэффект / Δстоимость:
+
+        push → sms          0.15·b·a / 4   — самый выгодный
+        sms → digital_ads   0.20·b·a / 18
+        digital_ads → call  0.35·b·a / 138 — почти никогда не окупается
+
+    Поэтому сначала переводим на sms всё, что окупается, затем поднимаем
+    выше самые «денежные» сегменты, пока есть бюджет.
+    """
+    ladder = ["push", "sms", "digital_ads", "call"]
+    for step in range(1, len(ladder)):
+        lo, hi = ladder[step - 1], ladder[step]
+        d_mult = CHANNELS[hi]["mult"] - CHANNELS[lo]["mult"]
+        d_cost = CHANNELS[hi]["cost"] - CHANNELS[lo]["cost"]
+        # сначала сегменты с максимальным приростом эффекта на абонента
+        for c in sorted(plan, key=lambda x: -x["base"] * x["arpu"]):
+            if c["channel"] != lo:
+                continue
+            gain = d_mult * c["base"] * c["arpu"]
+            if gain <= d_cost:            # апгрейд не окупается на этом сегменте
+                continue
+            cost = d_cost * c["reach"]
+            if cost > budget:
+                continue
+            c["channel"] = hi
+            budget -= cost
+
+
+REQUIRED_COLUMNS = {"ID_NUMBER", "current_tariff", "arpu_segment", "predicted_arpu"}
+
+
+def validate_plan(plan: list[dict], env) -> list[dict]:
+    """Отсекает некорректные кампании до того, как их отбросит среда.
+
+    Среда молча выбрасывает кампанию с несуществующим тарифом или каналом,
+    и вместе с ней теряется охват. Дешевле проверить самим и сообщить.
+    """
+    try:
+        known_tariffs = set(env.tariffs["tariff_plan_code"])
+    except Exception:  # noqa: BLE001 — без справочника проверяем только каналы
+        known_tariffs = None
+    known_channels = set(getattr(env, "channels", CHANNELS))
+
+    clean, seen = [], set()
+    for c in plan:
+        name = c.get("campaign_name", "без имени")
+        if c.get("channel") not in known_channels:
+            print(f"[validate] «{name}»: неизвестный канал {c.get('channel')!r}, пропуск")
+            continue
+        if known_tariffs is not None and c.get("target_tariff") not in known_tariffs:
+            print(f"[validate] «{name}»: неизвестный тариф {c.get('target_tariff')!r}, пропуск")
+            continue
+        key = (c.get("filter_arpu_segment"), c.get("filter_current_tariff"),
+               c.get("target_tariff"))
+        if key in seen:
+            print(f"[validate] «{name}»: дубль сегмента, пропуск")
+            continue
+        seen.add(key)
+        clean.append(c)
+
+    if len(clean) > MAX_CAMPAIGNS:
+        print(f"[validate] кампаний {len(clean)} > {MAX_CAMPAIGNS}, оставляем первые")
+        clean = clean[:MAX_CAMPAIGNS]
+    return clean
+
+
+class Agent:
+    """Исследует эффекты пилотами и возвращает план кампаний."""
+
+    @staticmethod
+    def _campaign(c: dict, sources: list[str], reach: int, idx: int) -> dict:
+        """Одна кампания: часть сегмента с общим целевым тарифом."""
+        suffix = f"_part{idx}" if idx > 1 else ""
+        return {
+            "campaign_name": f"{c['arpu_segment']}_to_{c['target_tariff']}{suffix}",
+            "filter_arpu_segment": c["arpu_segment"],
+            "filter_current_tariff": ";".join(sources),
+            "target_tariff": c["target_tariff"],
+            "channel": "push",
+            "reach": reach,
+            "base": c["base"],
+            "arpu": c["arpu"],
+        }
+
+    def act(self, env) -> list[dict]:
+        profile = getattr(env, "customer_profile", None)
+        if profile is None or len(profile) == 0:
+            print("[agent] аудитория пуста — плана нет")
+            return []
+        missing = REQUIRED_COLUMNS - set(profile.columns)
+        if missing:
+            print(f"[agent] в аудитории нет колонок {sorted(missing)} — плана нет")
+            return []
+        prior = build_prior()
+        candidates = build_candidates(profile, prior)
+
+        if not candidates:
+            print("[agent] кандидатов нет — возвращаем пустой план")
+            return []
+
+        # ── разведка ──────────────────────────────────────────────────────
+        measured = []
+        for cand in candidates[:N_PILOTS]:
+            if getattr(env, "pilots_left", 0) <= 0:
+                break
+            try:
+                res = env.run_pilot(
+                    target_tariff=cand["target_tariff"],
+                    channel=PILOT_CHANNEL,
+                    n_customers=PILOT_SIZE,
+                    filter_arpu_segment=cand["arpu_segment"],
+                    filter_current_tariff=cand["current_tariff"],
+                )
+            except Exception as exc:  # noqa: BLE001 — пилот не должен ронять прогон
+                print(f"[pilot] пропуск: {type(exc).__name__}: {exc}")
+                continue
+
+            n = max(int(res.get("n_customers", 1)), 1)
+            observed = float(res.get("observed_lift_ratio", 0.0))
+            noise = PER_CUSTOMER_STD / np.sqrt(n)
+            # пересчёт наблюдения на «канал-независимую» величину
+            base = observed / CHANNELS[PILOT_CHANNEL]["mult"]
+            base_lo = (observed - CONFIDENCE_Z * noise) / CHANNELS[PILOT_CHANNEL]["mult"]
+            measured.append({**cand, "base": base, "base_lo": base_lo, "n": n})
+
+        if not measured:
+            print("[agent] ни один пилот не удался — плана нет")
+            return []
+
+        # ── отбор: только уверенно положительные ──────────────────────────
+        # на группу оставляем лучшую из проверенных гипотез: сегменты
+        # не должны пересекаться, иначе платим за абонента дважды
+        best_per_group: dict[tuple, dict] = {}
+        for m in measured:
+            key = (m["current_tariff"], m["arpu_segment"])
+            cur = best_per_group.get(key)
+            if cur is None or m["base_lo"] > cur["base_lo"]:
+                best_per_group[key] = m
+        good = [m for m in best_per_group.values() if m["base_lo"] > 0]
+        print(f"[agent] пилотов: {len(measured)}, прошли порог: {len(good)}")
+        if not good:
+            return []
+
+        # ценность на абонента — по нижней границе, чтобы не переоценить шум
+        good.sort(key=lambda m: m["base_lo"] * m["arpu"], reverse=True)
+
+        # ── шаг 1: сливаем группы в кампании ──────────────────────────────
+        # Лимит — 10 кампаний, а подтверждённых групп больше. Фильтр
+        # `filter_current_tariff` принимает список через «;», поэтому группы
+        # с одинаковой парой «сегмент → целевой тариф» объединяем в одну
+        # кампанию. Каждая группа попадает ровно в одну кампанию, значит
+        # абоненты не пересекаются и контакты не тратятся дважды.
+        # Пилоты покрывают не все исходные тарифы, но эффект определяется
+        # сегментом, а не тарифом-источником. Поэтому знание «LOW → tariff_9
+        # работает» переносим на ВЕСЬ сегмент, исключая только те источники,
+        # которые пилот показал уверенно отрицательными.
+        by_seg: dict[str, list[dict]] = {}
+        for m in measured:
+            by_seg.setdefault(m["arpu_segment"], []).append(m)
+
+        campaigns = []
+        for seg, rows in by_seg.items():
+            positives = [r for r in rows if r["base_lo"] > 0]
+            if not positives:
+                continue
+            # целевой тариф — тот, что показал лучший подтверждённый эффект
+            best = max(positives, key=lambda r: r["base_lo"] * r["arpu"])
+            target = best["target_tariff"]
+
+            # уверенно отрицательные источники исключаем поимённо
+            bad = {r["current_tariff"] for r in rows
+                   if r["base"] + CONFIDENCE_Z * PER_CUSTOMER_STD / np.sqrt(r["n"]) / 0.5 < 0}
+            seg_rows = profile[profile["arpu_segment"] == seg]
+            if TRANSFER_TO_SEGMENT:
+                known = set(seg_rows["current_tariff"].dropna().astype(str))
+            else:
+                known = {r["current_tariff"] for r in positives}
+            sources = sorted(known - bad - {target})
+            if not sources:
+                continue
+            covered = seg_rows[seg_rows["current_tariff"].isin(sources)]
+            if covered.empty:
+                continue
+
+            # эффект оцениваем консервативно: по подтверждённым пилотам сегмента
+            base = float(np.average([r["base_lo"] for r in positives],
+                                    weights=[r["size"] for r in positives]))
+            campaigns.append({
+                "arpu_segment": seg,
+                "target_tariff": target,
+                "sources": sources,
+                "size": int(len(covered)),
+                "arpu": float(covered["predicted_arpu"].mean()),
+                "base": base,
+            })
+        campaigns.sort(key=lambda c: -c["base"] * c["arpu"])
+
+        # ── шаг 2: заполняем охват, канал пока самый дешёвый ──────────────
+        contacts_left = int(getattr(env, "remaining_contacts", 0))
+        budget_left = float(getattr(env, "remaining_budget", 0.0))
+        plan = []
+
+        # Сегмент может быть больше лимита на одну кампанию (MID — 6 780
+        # абонентов при лимите 5 000). Разбиваем его на несколько кампаний
+        # по исходным тарифам: слоты кампаний дешевле, чем потерянный охват.
+        for c in campaigns:
+            if contacts_left <= 0 or len(plan) >= MAX_CAMPAIGNS:
+                break
+            seg_rows = profile[profile["arpu_segment"] == c["arpu_segment"]]
+            part, part_size, part_idx = [], 0, 1
+            for src in c["sources"]:
+                n = int((seg_rows["current_tariff"] == src).sum())
+                if n == 0:
+                    continue
+                # текущая часть переполнится — закрываем её и начинаем новую
+                if part and part_size + n > MAX_PER_CAMPAIGN:
+                    reach = min(part_size, contacts_left)
+                    if reach > 0 and len(plan) < MAX_CAMPAIGNS:
+                        plan.append(self._campaign(c, part, reach, part_idx))
+                        contacts_left -= reach
+                        part_idx += 1
+                    part, part_size = [], 0
+                    if contacts_left <= 0 or len(plan) >= MAX_CAMPAIGNS:
+                        break
+                part.append(src)
+                part_size += n
+            if part and contacts_left > 0 and len(plan) < MAX_CAMPAIGNS:
+                reach = min(part_size, contacts_left)
+                if reach > 0:
+                    plan.append(self._campaign(c, part, reach, part_idx))
+                    contacts_left -= reach
+
+        # ── шаг 2: тратим бюджет на апгрейд каналов ───────────────────────
+        allocate_channels(plan, budget_left)
+
+        # объяснение плана словами: числа уже посчитаны, модель их не меняет
+        try:
+            from explain import explain_plan
+            print()
+            print("=== Обоснование плана ===")
+            print(explain_plan(plan, list(getattr(env, "pilot_history", []))))
+            print("=== конец обоснования ===")
+            print()
+        except Exception as exc:  # noqa: BLE001 — объяснение не критично для сдачи
+            print(f"[explain] пропущено: {type(exc).__name__}: {exc}")
+
+        spent = sum(CHANNELS[c["channel"]]["cost"] * c["reach"] for c in plan)
+        print(f"[agent] кампаний: {len(plan)}, охват использован: "
+              f"{sum(c['reach'] for c in plan)}, бюджет: {spent:.0f}")
+
+        # лимиты применяются по порядку списка — самые ценные вперёд
+        plan.sort(key=lambda c: -c["base"] * c["arpu"] * CHANNELS[c["channel"]]["mult"])
+        result = [{k: v for k, v in c.items() if k not in ("reach", "base", "arpu")}
+                  for c in plan]
+        return validate_plan(result, env)

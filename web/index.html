@@ -1,0 +1,363 @@
+<!doctype html>
+<html lang="ru" class="dark">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Агент тарифных кампаний</title>
+<script src="https://cdn.tailwindcss.com"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/Chart.js/4.4.1/chart.umd.min.js"></script>
+<script>tailwind.config = { darkMode: 'class' }</script>
+</head>
+<body class="min-h-screen bg-slate-950 text-slate-100 antialiased">
+
+<header class="border-b border-slate-800 bg-slate-900/60 backdrop-blur">
+  <div class="mx-auto flex max-w-6xl flex-wrap items-center gap-4 px-4 py-4">
+    <div class="min-w-0 flex-1">
+      <h1 class="truncate text-lg font-semibold">Агент тарифных маркетинговых кампаний</h1>
+      <p class="truncate text-sm text-slate-400">Beeline · трек 04 «Телекоммуникации» · HackAlem AI 2026</p>
+    </div>
+    <div class="flex shrink-0 items-center gap-2">
+      <label for="seed" class="text-sm text-slate-400">seed</label>
+      <input id="seed" type="number" value="42" class="w-20 rounded-lg border border-slate-700 bg-slate-900 px-2 py-1.5 text-sm outline-none focus:border-sky-500">
+      <button id="run" class="rounded-lg bg-sky-500 px-4 py-1.5 text-sm font-medium text-slate-950 hover:bg-sky-400 disabled:opacity-50">
+        Запустить агента
+      </button>
+      <button id="stab" class="rounded-lg border border-slate-700 px-4 py-1.5 text-sm font-medium text-slate-300 hover:border-sky-500 hover:text-sky-300 disabled:opacity-50">
+        Устойчивость ×5
+      </button>
+      <button id="cmp" class="rounded-lg border border-slate-700 px-4 py-1.5 text-sm font-medium text-slate-300 hover:border-violet-500 hover:text-violet-300 disabled:opacity-50">
+        Сравнить стратегии
+      </button>
+    </div>
+  </div>
+</header>
+
+<main class="mx-auto max-w-6xl px-4 py-6">
+
+  <p id="hint" class="rounded-xl border border-slate-800 bg-slate-900/50 p-4 text-sm text-slate-400">
+    Агент исследует базу пилотными кампаниями и возвращает план. Нажмите «Запустить агента».
+  </p>
+
+  <section id="kpis" class="hidden grid gap-3 sm:grid-cols-2 lg:grid-cols-4 [&>*]:min-w-0"></section>
+
+  <section id="compare" class="mt-4 hidden rounded-xl border border-slate-800 bg-slate-900/50 p-5">
+    <h2 class="text-sm font-medium text-slate-300">Чистый результат против стартового примера</h2>
+    <div class="mt-4 space-y-3">
+      <div>
+        <div class="flex items-baseline justify-between gap-4 text-sm">
+          <span class="text-slate-400">Стартовый пример организаторов</span>
+          <span class="font-mono text-rose-400">−1 035 279</span>
+        </div>
+        <div class="mt-1 h-2 overflow-hidden rounded-full bg-slate-800">
+          <div class="h-full w-1/5 rounded-full bg-rose-500"></div>
+        </div>
+      </div>
+      <div>
+        <div class="flex items-baseline justify-between gap-4 text-sm">
+          <span class="text-slate-300">Наш агент</span>
+          <span id="cmp-net" class="font-mono text-emerald-400"></span>
+        </div>
+        <div class="mt-1 h-2 overflow-hidden rounded-full bg-slate-800">
+          <div id="cmp-bar" class="h-full w-0 rounded-full bg-emerald-500 transition-all duration-700"></div>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <section id="stab-wrap" class="mt-4 hidden rounded-xl border border-slate-800 bg-slate-900/50 p-5">
+    <h2 class="text-sm font-medium text-slate-300">Устойчивость по разным seed</h2>
+    <p class="mt-1 text-xs text-slate-500">
+      Один прогон — это одна реализация шума пилотов. Важно не лучшее значение, а то,
+      что знак результата не скачет.
+    </p>
+    <div id="stab-summary" class="mt-3 flex flex-wrap gap-4 text-sm"></div>
+    <div class="mt-4 h-48"><canvas id="stab-chart"></canvas></div>
+  </section>
+
+  <section id="strat-wrap" class="mt-4 hidden rounded-xl border border-slate-800 bg-slate-900/50 p-5">
+    <h2 class="text-sm font-medium text-slate-300">Цена главного архитектурного решения</h2>
+    <p class="mt-1 text-xs text-slate-500">
+      Пилоты покрывают не все исходные тарифы. Переносить ли подтверждённый вывод на весь
+      сегмент — единственный параметр, который реально влияет на результат. Остальные
+      меняют его в пределах шума.
+    </p>
+    <div id="strat" class="mt-4 grid gap-3 sm:grid-cols-2 [&>*]:min-w-0"></div>
+  </section>
+
+  <section id="data-wrap" class="mt-4 hidden rounded-xl border border-slate-800 bg-slate-900/50 p-5">
+    <h2 class="text-sm font-medium text-slate-300">Почему агент не трогает 59% базы</h2>
+    <p class="mt-1 text-xs text-slate-500">
+      Эффект определяется ARPU-сегментом, а не парой тарифов. Это возврат к среднему:
+      дешёвые абоненты после смены тарифа платят больше, дорогие — меньше.
+      Сегмент HIGH — самый крупный и убыточный, поэтому агент, гонящийся за охватом, уходит в минус.
+    </p>
+    <div id="segments" class="mt-4 grid gap-3 sm:grid-cols-3 [&>*]:min-w-0"></div>
+    <h3 class="mt-5 text-xs uppercase tracking-wide text-slate-500">Лучшие цели по истории</h3>
+    <div id="targets" class="mt-2 grid gap-2 sm:grid-cols-2 [&>*]:min-w-0"></div>
+  </section>
+
+  <section id="chart-wrap" class="mt-4 hidden rounded-xl border border-slate-800 bg-slate-900/50 p-5">
+    <h2 class="text-sm font-medium text-slate-300">Разведка: результат каждого пилота</h2>
+    <p class="mt-1 text-xs text-slate-500">
+      Пилоты идут каналом push — он бесплатен, поэтому разведка тратит только охват.
+      Красные столбцы — гипотезы, которые агент отбросил.
+    </p>
+    <div class="mt-4 h-64"><canvas id="pilots"></canvas></div>
+  </section>
+
+  <section id="plan-wrap" class="mt-4 hidden rounded-xl border border-slate-800 bg-slate-900/50 p-5">
+    <h2 class="text-sm font-medium text-slate-300">План кампаний</h2>
+    <div class="mt-4 overflow-x-auto">
+      <table class="w-full text-sm">
+        <thead class="text-left text-xs uppercase tracking-wide text-slate-500">
+          <tr class="border-b border-slate-800">
+            <th class="py-2 pr-4 font-medium">Кампания</th>
+            <th class="py-2 pr-4 font-medium">Канал</th>
+            <th class="py-2 pr-4 text-right font-medium">Контактов</th>
+            <th class="py-2 pr-4 text-right font-medium">Затраты</th>
+            <th class="py-2 text-right font-medium">Прирост</th>
+          </tr>
+        </thead>
+        <tbody id="plan" class="divide-y divide-slate-800"></tbody>
+      </table>
+    </div>
+  </section>
+
+  <section id="why-wrap" class="mt-4 hidden rounded-xl border border-slate-800 bg-slate-900/50 p-5">
+    <h2 class="text-sm font-medium text-slate-300">Обоснование плана</h2>
+    <p class="mt-1 text-xs text-slate-500">
+      Все числа посчитаны в коде. Модель их только пересказывает и на решения не влияет.
+    </p>
+    <div id="why" class="mt-3 space-y-2 text-sm leading-relaxed text-slate-300"></div>
+  </section>
+
+</main>
+
+<footer class="mx-auto max-w-6xl px-4 pb-10 text-xs text-slate-600">
+  Интерфейс — надстройка над той же логикой, что и в CLI.
+  Сдача работает без веба: <span class="font-mono text-slate-500">python local_eval.py</span>
+</footer>
+
+<script>
+const $ = (s) => document.querySelector(s);
+const fmt = (n) => Math.round(n).toLocaleString('ru-RU').replace(/,/g, ' ');
+const CHANNELS = {
+  push: ['push', 'bg-slate-700 text-slate-200'],
+  sms: ['SMS · 4', 'bg-sky-900 text-sky-200'],
+  digital_ads: ['реклама · 22', 'bg-violet-900 text-violet-200'],
+  call: ['звонок · 160', 'bg-amber-900 text-amber-200'],
+};
+let chart = null;
+
+function kpi(label, value, note, tone) {
+  return `<div class="rounded-xl border border-slate-800 bg-slate-900/50 p-4">
+    <div class="text-xs uppercase tracking-wide text-slate-500">${label}</div>
+    <div class="mt-1 break-words font-mono text-2xl ${tone}">${value}</div>
+    <div class="mt-1 text-xs text-slate-500">${note}</div>
+  </div>`;
+}
+
+function render(d) {
+  const green = d.net > 0 ? 'text-emerald-400' : 'text-rose-400';
+  $('#kpis').innerHTML = [
+    kpi('Чистый результат', fmt(d.net), `${d.growth_pct.toFixed(2)}% к baseline`, green),
+    kpi('Прирост ARPU', fmt(d.gross), `затраты ${fmt(d.cost)} у.е.`, 'text-slate-100'),
+    kpi('Охват', fmt(d.unique_customers), `${d.coverage_pct.toFixed(1)}% базы · ${fmt(d.contacts)} контактов`, 'text-slate-100'),
+    kpi('Доля с отрицательным эффектом', d.risk_pct.toFixed(1) + '%', `пилотов ${d.n_pilots} из 20 · ${d.elapsed_s} с`, d.risk_pct < 20 ? 'text-emerald-400' : 'text-amber-400'),
+  ].join('');
+  $('#kpis').classList.remove('hidden');
+  $('#kpis').classList.add('grid');
+
+  $('#cmp-net').textContent = (d.net > 0 ? '+' : '') + fmt(d.net);
+  const width = Math.max(5, Math.min(100, (d.net / 5000000) * 100));
+  $('#compare').classList.remove('hidden');
+  setTimeout(() => { $('#cmp-bar').style.width = width + '%'; }, 50);
+
+  const labels = d.pilots.map((p, i) => 'П' + (i + 1));
+  const values = d.pilots.map((p) => p.gross_lift);
+  if (chart) chart.destroy();
+  chart = new Chart($('#pilots'), {
+    type: 'bar',
+    data: {
+      labels,
+      datasets: [{
+        data: values,
+        backgroundColor: values.map((v) => v > 0 ? 'rgba(16,185,129,.75)' : 'rgba(244,63,94,.75)'),
+        borderRadius: 4,
+      }],
+    },
+    options: {
+      responsive: true, maintainAspectRatio: false,
+      plugins: { legend: { display: false }, tooltip: { callbacks: { label: (c) => fmt(c.raw) + ' у.е.' } } },
+      scales: {
+        x: { grid: { display: false }, ticks: { color: '#64748b', font: { size: 10 } } },
+        y: { grid: { color: 'rgba(148,163,184,.12)' }, ticks: { color: '#64748b', callback: (v) => fmt(v) } },
+      },
+    },
+  });
+  $('#chart-wrap').classList.remove('hidden');
+
+  $('#plan').innerHTML = d.campaigns.map((c) => {
+    const [name, cls] = CHANNELS[c.channel] || [c.channel, 'bg-slate-700 text-slate-200'];
+    const tone = c.gross_lift > 0 ? 'text-emerald-400' : 'text-rose-400';
+    return `<tr>
+      <td class="break-words py-2 pr-4">${c.name}</td>
+      <td class="py-2 pr-4"><span class="whitespace-nowrap rounded-md px-2 py-0.5 text-xs ${cls}">${name}</span></td>
+      <td class="py-2 pr-4 text-right font-mono">${fmt(c.contacts)}</td>
+      <td class="py-2 pr-4 text-right font-mono text-slate-400">${fmt(c.cost)}</td>
+      <td class="py-2 text-right font-mono ${tone}">${fmt(c.gross_lift)}</td>
+    </tr>`;
+  }).join('');
+  $('#plan-wrap').classList.remove('hidden');
+
+  $('#why').innerHTML = (d.explanation || '').split('\n').filter(Boolean)
+    .map((line) => `<p class="break-words">${line.replace(/\*\*(.+?)\*\*/g, '<b class="text-slate-100">$1</b>')}</p>`)
+    .join('');
+  $('#why-wrap').classList.toggle('hidden', !d.explanation);
+
+  $('#hint').classList.add('hidden');
+}
+
+async function run() {
+  const btn = $('#run');
+  btn.disabled = true;
+  btn.textContent = 'Считаем…';
+  $('#hint').classList.remove('hidden');
+  $('#hint').textContent = 'Агент пилотирует гипотезы…';
+  try {
+    const res = await fetch('/api/run', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ seed: Number($('#seed').value) || 0 }),
+    });
+    if (!res.ok) throw new Error('HTTP ' + res.status);
+    render(await res.json());
+  } catch (e) {
+    $('#hint').textContent = 'Ошибка: ' + e.message;
+  } finally {
+    btn.disabled = false;
+    btn.textContent = 'Запустить агента';
+  }
+}
+
+let stabChart = null;
+
+async function stability() {
+  const btn = $('#stab');
+  btn.disabled = true;
+  btn.textContent = 'Считаем…';
+  try {
+    const d = await (await fetch('/api/stability?runs=5')).json();
+    const allPos = d.positive === d.runs;
+    $('#stab-summary').innerHTML = [
+      ['медиана', fmt(d.median), 'text-slate-100'],
+      ['минимум', fmt(d.min), 'text-slate-400'],
+      ['максимум', fmt(d.max), 'text-slate-400'],
+      ['в плюс', `${d.positive} из ${d.runs}`, allPos ? 'text-emerald-400' : 'text-amber-400'],
+    ].map(([k, v, tone]) => `<div><span class="text-slate-500">${k}:</span>
+        <span class="ml-1 font-mono ${tone}">${v}</span></div>`).join('');
+
+    if (stabChart) stabChart.destroy();
+    stabChart = new Chart($('#stab-chart'), {
+      type: 'line',
+      data: {
+        labels: d.nets.map((_, i) => 'seed ' + i),
+        datasets: [{
+          data: d.nets, borderColor: '#38bdf8', backgroundColor: 'rgba(56,189,248,.15)',
+          fill: true, tension: .3, pointRadius: 4, pointBackgroundColor: '#38bdf8',
+        }],
+      },
+      options: {
+        responsive: true, maintainAspectRatio: false,
+        plugins: { legend: { display: false }, tooltip: { callbacks: { label: (c) => fmt(c.raw) } } },
+        scales: {
+          x: { grid: { display: false }, ticks: { color: '#64748b', font: { size: 10 } } },
+          y: { beginAtZero: true, grid: { color: 'rgba(148,163,184,.12)' },
+               ticks: { color: '#64748b', callback: (v) => fmt(v) } },
+        },
+      },
+    });
+    $('#stab-wrap').classList.remove('hidden');
+  } catch (e) {
+    $('#hint').classList.remove('hidden');
+    $('#hint').textContent = 'Ошибка устойчивости: ' + e.message;
+  } finally {
+    btn.disabled = false;
+    btn.textContent = 'Устойчивость ×5';
+  }
+}
+
+async function insights() {
+  try {
+    const d = await (await fetch('/api/insights')).json();
+    $('#segments').innerHTML = d.segments.map((s) => {
+      const good = s.median_lift > 0;
+      const tone = good ? 'text-emerald-400' : 'text-rose-400';
+      const border = good ? 'border-emerald-900' : 'border-rose-900';
+      return `<div class="rounded-lg border ${border} bg-slate-900 p-4">
+        <div class="flex items-center justify-between gap-2">
+          <span class="font-medium">${s.segment}</span>
+          <span class="rounded-md bg-slate-800 px-2 py-0.5 text-xs text-slate-400">${s.share_pct}% базы</span>
+        </div>
+        <div class="mt-2 font-mono text-2xl ${tone}">${good ? '+' : ''}${s.median_lift.toFixed(2)}</div>
+        <div class="mt-1 text-xs text-slate-500">
+          медианный прирост · ${fmt(s.customers)} абонентов · ARPU ${fmt(s.mean_arpu)}
+        </div>
+        <div class="mt-2 text-xs ${good ? 'text-emerald-500' : 'text-rose-500'}">
+          ${good ? 'работаем' : 'исключён из кандидатов'}
+        </div>
+      </div>`;
+    }).join('');
+
+    $('#targets').innerHTML = d.targets.map((t) => `
+      <div class="flex items-center justify-between gap-3 rounded-lg border border-slate-800 bg-slate-900 px-3 py-2 text-sm">
+        <span class="truncate"><span class="text-slate-500">${t.segment} →</span> ${t.target}</span>
+        <span class="shrink-0 font-mono text-emerald-400">+${t.median_lift.toFixed(2)}
+          <span class="text-xs text-slate-600">n=${t.n}</span></span>
+      </div>`).join('');
+    $('#data-wrap').classList.remove('hidden');
+  } catch (e) { /* разбор данных не критичен для основного сценария */ }
+}
+
+async function compare() {
+  const btn = $('#cmp');
+  btn.disabled = true;
+  btn.textContent = 'Считаем…';
+  try {
+    const d = await (await fetch('/api/compare')).json();
+    const card = (title, v, note, best) => `
+      <div class="rounded-lg border ${best ? 'border-emerald-800 bg-emerald-950/30' : 'border-slate-800 bg-slate-900'} p-4">
+        <div class="flex items-center justify-between gap-2">
+          <span class="text-sm font-medium">${title}</span>
+          ${best ? '<span class="rounded-md bg-emerald-900 px-2 py-0.5 text-xs text-emerald-200">выбрано</span>' : ''}
+        </div>
+        <div class="mt-2 font-mono text-2xl ${best ? 'text-emerald-400' : 'text-slate-300'}">${fmt(v.median)}</div>
+        <div class="mt-1 text-xs text-slate-500">
+          медиана 5 прогонов · охват ${fmt(v.avg_reach)} · в плюс ${v.positive} из 5
+        </div>
+        <div class="mt-1 text-xs text-slate-600">минимум ${fmt(v.min)}</div>
+        <div class="mt-2 text-xs text-slate-500">${note}</div>
+      </div>`;
+    $('#strat').innerHTML =
+      card('Перенос вывода на сегмент', d.transfer,
+           `Знание «сегмент работает» применяем ко всем его тарифам, кроме уверенно убыточных. Плюс ${d.delta_pct}% к результату.`, true) +
+      card('Только измеренные группы', d.measured_only,
+           'Действуем строго по пилотированным группам. Безопаснее, но охват заметно меньше.', false);
+    $('#strat-wrap').classList.remove('hidden');
+  } catch (e) {
+    $('#hint').classList.remove('hidden');
+    $('#hint').textContent = 'Ошибка сравнения: ' + e.message;
+  } finally {
+    btn.disabled = false;
+    btn.textContent = 'Сравнить стратегии';
+  }
+}
+
+$('#run').addEventListener('click', run);
+$('#stab').addEventListener('click', stability);
+$('#cmp').addEventListener('click', compare);
+run();
+insights();
+</script>
+</body>
+</html>
