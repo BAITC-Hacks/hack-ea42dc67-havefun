@@ -80,7 +80,25 @@ def main() -> int:
     check(A.Agent().act(env4) == [], "нет истории — пустой план, без падения")
     A.HISTORY_PATH = saved
 
-    print("\n=== 5. Валидация плана ===")
+    print("" + chr(10) + "=== 5. Решение не зависит от языковой модели ===")
+    import explain as E
+
+    def _boom(*a, **k):
+        raise RuntimeError("модель недоступна")
+
+    saved_explain = E.explain_plan
+    with contextlib.redirect_stdout(_io.StringIO()):
+        base = evaluate_agent(A.Agent(), seed=7, verbose=False)["net_arpu_gain"]
+        E.explain_plan = _boom          # имитируем полный отказ модели
+        try:
+            broken = evaluate_agent(A.Agent(), seed=7, verbose=False)["net_arpu_gain"]
+        finally:
+            E.explain_plan = saved_explain
+    check(abs(base - broken) < 1e-6,
+          "результат совпадает при недоступной модели",
+          "%.0f против %.0f" % (base, broken))
+
+    print("\n=== 6. Валидация плана ===")
     broken = [
         {"campaign_name": "плохой канал", "target_tariff": "tariff_9", "channel": "телепатия"},
         {"campaign_name": "плохой тариф", "target_tariff": "tariff_999", "channel": "sms"},
