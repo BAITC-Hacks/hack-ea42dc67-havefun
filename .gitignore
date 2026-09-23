@@ -6,3 +6,6 @@ venv/
 .DS_Store
 data/traffic.csv
 data/arpu_monthly.csv
+Dockerfile
+docker-entrypoint.sh
+.dockerignore

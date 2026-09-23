@@ -1,246 +1,413 @@
 <!doctype html>
-<html lang="ru" class="dark">
+<html lang="ru" class="dark" data-theme="business">
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>Агент тарифных кампаний</title>
+<title>План тарифных кампаний</title>
+<link href="https://cdn.jsdelivr.net/npm/daisyui@4.12.14/dist/full.min.css" rel="stylesheet">
 <script src="https://cdn.tailwindcss.com"></script>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/Chart.js/4.4.1/chart.umd.min.js"></script>
 <script>tailwind.config = { darkMode: 'class' }</script>
 </head>
 <body class="min-h-screen bg-slate-950 text-slate-100 antialiased">
 
-<header class="border-b border-slate-800 bg-slate-900/60 backdrop-blur">
-  <div class="mx-auto flex max-w-6xl flex-wrap items-center gap-4 px-4 py-4">
-    <div class="min-w-0 flex-1">
-      <h1 class="truncate text-lg font-semibold">Агент тарифных маркетинговых кампаний</h1>
-      <p class="truncate text-sm text-slate-400">Beeline · трек 04 «Телекоммуникации» · HackAlem AI 2026</p>
-    </div>
-    <div class="flex shrink-0 items-center gap-2">
-      <label for="seed" class="text-sm text-slate-400">seed</label>
-      <input id="seed" type="number" value="42" class="w-20 rounded-lg border border-slate-700 bg-slate-900 px-2 py-1.5 text-sm outline-none focus:border-sky-500">
-      <button id="run" class="rounded-lg bg-sky-500 px-4 py-1.5 text-sm font-medium text-slate-950 hover:bg-sky-400 disabled:opacity-50">
-        Запустить агента
-      </button>
-      <button id="stab" class="rounded-lg border border-slate-700 px-4 py-1.5 text-sm font-medium text-slate-300 hover:border-sky-500 hover:text-sky-300 disabled:opacity-50">
-        Устойчивость ×5
-      </button>
-      <button id="cmp" class="rounded-lg border border-slate-700 px-4 py-1.5 text-sm font-medium text-slate-300 hover:border-violet-500 hover:text-violet-300 disabled:opacity-50">
-        Сравнить стратегии
+<header class="border-b border-slate-800 bg-slate-900/70 backdrop-blur">
+  <div class="mx-auto max-w-6xl px-4 py-4">
+    <div class="flex flex-wrap items-center gap-4">
+      <div class="min-w-0 flex-1">
+        <h1 class="truncate text-lg font-semibold">План тарифных маркетинговых кампаний</h1>
+        <p class="truncate text-sm text-slate-400">Кому предложить смену тарифа в следующем месяце</p>
+      </div>
+      <button id="run" class="btn btn-sm btn-primary shrink-0">
+        Пересобрать план
       </button>
     </div>
+    <nav role="tablist" class="tabs tabs-boxed mt-4 bg-slate-900">
+      <button role="tab" data-tab="plan" class="tab">План</button>
+      <button role="tab" data-tab="proof" class="tab">Как это проверено</button>
+    </nav>
   </div>
 </header>
 
 <main class="mx-auto max-w-6xl px-4 py-6">
 
-  <p id="hint" class="rounded-xl border border-slate-800 bg-slate-900/50 p-4 text-sm text-slate-400">
-    Агент исследует базу пилотными кампаниями и возвращает план. Нажмите «Запустить агента».
-  </p>
+  <section data-panel="plan">
 
-  <section id="kpis" class="hidden grid gap-3 sm:grid-cols-2 lg:grid-cols-4 [&>*]:min-w-0"></section>
+    <div id="verdict" class="rounded-xl border border-slate-800 bg-slate-900/50 p-6">
+      <p class="text-sm text-slate-400">Агент исследует базу пилотными кампаниями. Это занимает пару секунд.</p>
+    </div>
 
-  <section id="compare" class="mt-4 hidden rounded-xl border border-slate-800 bg-slate-900/50 p-5">
-    <h2 class="text-sm font-medium text-slate-300">Чистый результат против стартового примера</h2>
-    <div class="mt-4 space-y-3">
-      <div>
-        <div class="flex items-baseline justify-between gap-4 text-sm">
-          <span class="text-slate-400">Стартовый пример организаторов</span>
-          <span class="font-mono text-rose-400">−1 035 279</span>
-        </div>
-        <div class="mt-1 h-2 overflow-hidden rounded-full bg-slate-800">
-          <div class="h-full w-1/5 rounded-full bg-rose-500"></div>
-        </div>
+    <div id="money" class="mt-4 hidden gap-3 sm:grid-cols-3"></div>
+
+    <section id="plan-wrap" class="mt-4 hidden rounded-xl border border-slate-800 bg-slate-900/50 p-5">
+      <h2 class="text-sm font-medium text-slate-300">Что запускаем</h2>
+      <div class="mt-4 overflow-x-auto">
+        <table class="table table-sm w-full">
+          <thead class="text-left text-xs uppercase tracking-wide text-slate-500">
+            <tr class="border-b border-slate-800">
+              <th class="py-2 pr-4 font-medium">Кому предлагаем</th>
+              <th class="py-2 pr-4 font-medium">Какой тариф</th>
+              <th class="py-2 pr-4 font-medium">Как свяжемся</th>
+              <th class="py-2 pr-4 text-right font-medium">Человек</th>
+              <th class="py-2 pr-4 text-right font-medium">Стоимость</th>
+              <th class="py-2 text-right font-medium">Принесёт</th>
+            </tr>
+          </thead>
+          <tbody id="plan" class="divide-y divide-slate-800"></tbody>
+        </table>
       </div>
-      <div>
-        <div class="flex items-baseline justify-between gap-4 text-sm">
-          <span class="text-slate-300">Наш агент</span>
-          <span id="cmp-net" class="font-mono text-emerald-400"></span>
-        </div>
-        <div class="mt-1 h-2 overflow-hidden rounded-full bg-slate-800">
-          <div id="cmp-bar" class="h-full w-0 rounded-full bg-emerald-500 transition-all duration-700"></div>
-        </div>
+      <p class="mt-3 text-xs text-slate-500">
+        Один абонент попадает максимум в одну кампанию: повторный контакт стоит денег, а эффект не удваивает.
+      </p>
+    </section>
+
+    <section class="mt-4 rounded-xl border border-slate-800 bg-slate-900/50 p-5">
+      <h2 class="text-sm font-medium text-slate-300">А если бюджет урежут?</h2>
+      <p class="mt-1 text-xs text-slate-500">
+        Агент заново проводит разведку и перераспределяет каналы под новое ограничение.
+        Это пересчёт, а не оценка на глаз.
+      </p>
+      <div class="mt-3 flex flex-wrap gap-2">
+        <button data-budget="25000" class="wif btn btn-sm btn-outline">25 000</button>
+        <button data-budget="50000" class="wif btn btn-sm btn-outline">50 000</button>
+        <button data-budget="100000" class="wif btn btn-sm btn-outline">100 000</button>
+      </div>
+      <div id="wif-out" class="mt-4 hidden overflow-x-auto">
+        <table class="table table-sm w-full">
+          <thead class="text-left text-xs uppercase tracking-wide text-slate-500">
+            <tr class="border-b border-slate-800">
+              <th class="py-2 pr-4 font-medium">Бюджет</th>
+              <th class="py-2 pr-4 text-right font-medium">Заработаем</th>
+              <th class="py-2 pr-4 text-right font-medium">Потратим</th>
+              <th class="py-2 pr-4 text-right font-medium">Охват</th>
+              <th class="py-2 font-medium">Каналы</th>
+            </tr>
+          </thead>
+          <tbody id="wif-rows" class="divide-y divide-slate-800"></tbody>
+        </table>
+        <p class="mt-2 text-xs text-slate-500">
+          Охват почти не меняется: он упирается в лимит контактов, а не в деньги.
+          Бюджет решает, каким каналом мы дотянемся — а значит, какая доля согласится.
+        </p>
+      </div>
+    </section>
+
+    <section id="skip-wrap" class="mt-4 hidden rounded-xl border border-amber-900/60 bg-amber-950/20 p-5">
+      <h2 class="text-sm font-medium text-amber-200">Почему мы не трогаем больше половины базы</h2>
+      <p id="skip-text" class="mt-2 text-sm leading-relaxed text-slate-300"></p>
+      <div id="segments" class="mt-4 grid gap-3 sm:grid-cols-3"></div>
+    </section>
+
+    <section id="why-wrap" class="mt-4 hidden rounded-xl border border-slate-800 bg-slate-900/50 p-5">
+      <h2 class="text-sm font-medium text-slate-300">Обоснование по каждой кампании</h2>
+      <div id="why" class="mt-3 space-y-2 text-sm leading-relaxed text-slate-300"></div>
+    </section>
+
+    <section class="mt-4 rounded-xl border border-slate-800 bg-slate-900/50 p-5">
+      <h2 class="text-sm font-medium text-slate-300">Спросить про план</h2>
+      <p class="mt-1 text-xs text-slate-500">
+        Отвечает модель, но только по посчитанным числам — пересчитывать их она не может.
+      </p>
+      <div class="mt-3 flex flex-wrap gap-2">
+        <input id="q" type="text" placeholder="Например: почему звонок только для маленькой группы?"
+               class="input input-sm input-bordered min-w-0 flex-1">
+        <button id="ask" class="btn btn-sm btn-outline shrink-0">
+          Спросить
+        </button>
+      </div>
+      <div id="chips" class="mt-2 flex flex-wrap gap-2"></div>
+      <div id="answer" class="mt-3 hidden rounded-lg border border-slate-800 bg-slate-950 p-3 text-sm leading-relaxed text-slate-300"></div>
+    </section>
+  </section>
+
+  <section data-panel="proof" class="hidden">
+
+    <div class="rounded-xl border border-slate-800 bg-slate-900/50 p-5">
+      <h2 class="text-sm font-medium text-slate-300">Три вопроса, которые задают решению</h2>
+      <p class="mt-1 text-xs text-slate-500">
+        Каждая кнопка считает ответ здесь и сейчас — тем же кодом, что и в командной строке.
+      </p>
+      <div class="mt-4 flex flex-wrap gap-2">
+        <button id="stab" class="btn btn-sm btn-outline">
+          А это не случайность? · 5 прогонов
+        </button>
+        <button id="scen" class="btn btn-sm btn-outline">
+          А если данные другие? · 6 миров
+        </button>
+        <button id="cmp" class="btn btn-sm btn-outline">
+          А почему так, а не иначе? · стратегии
+        </button>
       </div>
     </div>
-  </section>
 
-  <section id="stab-wrap" class="mt-4 hidden rounded-xl border border-slate-800 bg-slate-900/50 p-5">
-    <h2 class="text-sm font-medium text-slate-300">Устойчивость по разным seed</h2>
-    <p class="mt-1 text-xs text-slate-500">
-      Один прогон — это одна реализация шума пилотов. Важно не лучшее значение, а то,
-      что знак результата не скачет.
-    </p>
-    <div id="stab-summary" class="mt-3 flex flex-wrap gap-4 text-sm"></div>
-    <div class="mt-4 h-48"><canvas id="stab-chart"></canvas></div>
-  </section>
+    <section id="scen-wrap" class="mt-4 hidden rounded-xl border border-slate-800 bg-slate-900/50 p-5">
+      <div class="flex flex-wrap items-center justify-between gap-3">
+        <h2 class="text-sm font-medium text-slate-300">Миры с другой моделью эффектов</h2>
+        <span id="scen-badge" class="rounded-md px-2 py-0.5 text-xs"></span>
+      </div>
+      <p class="mt-1 text-xs text-slate-500">
+        В ТЗ сказано: на судействе эффекты другие. Если агент просто запомнил, что экономные абоненты
+        растут, а дорогие падают, в другом мире он развалится. Здесь тот же агент работает там,
+        где правило перевёрнуто.
+      </p>
+      <div id="scen-list" class="mt-4 space-y-2"></div>
+    </section>
 
-  <section id="strat-wrap" class="mt-4 hidden rounded-xl border border-slate-800 bg-slate-900/50 p-5">
-    <h2 class="text-sm font-medium text-slate-300">Цена главного архитектурного решения</h2>
-    <p class="mt-1 text-xs text-slate-500">
-      Пилоты покрывают не все исходные тарифы. Переносить ли подтверждённый вывод на весь
-      сегмент — единственный параметр, который реально влияет на результат. Остальные
-      меняют его в пределах шума.
-    </p>
-    <div id="strat" class="mt-4 grid gap-3 sm:grid-cols-2 [&>*]:min-w-0"></div>
-  </section>
+    <section id="stab-wrap" class="mt-4 hidden rounded-xl border border-slate-800 bg-slate-900/50 p-5">
+      <h2 class="text-sm font-medium text-slate-300">Устойчивость по разным прогонам</h2>
+      <p class="mt-1 text-xs text-slate-500">
+        Пилот — выборка, а выборка шумит. Важно не лучшее значение, а то, что знак не скачет.
+      </p>
+      <div id="stab-summary" class="mt-3 flex flex-wrap gap-4 text-sm"></div>
+      <div class="mt-4 h-48"><canvas id="stab-chart"></canvas></div>
+    </section>
 
-  <section id="data-wrap" class="mt-4 hidden rounded-xl border border-slate-800 bg-slate-900/50 p-5">
-    <h2 class="text-sm font-medium text-slate-300">Почему агент не трогает 59% базы</h2>
-    <p class="mt-1 text-xs text-slate-500">
-      Эффект определяется ARPU-сегментом, а не парой тарифов. Это возврат к среднему:
-      дешёвые абоненты после смены тарифа платят больше, дорогие — меньше.
-      Сегмент HIGH — самый крупный и убыточный, поэтому агент, гонящийся за охватом, уходит в минус.
-    </p>
-    <div id="segments" class="mt-4 grid gap-3 sm:grid-cols-3 [&>*]:min-w-0"></div>
-    <h3 class="mt-5 text-xs uppercase tracking-wide text-slate-500">Лучшие цели по истории</h3>
-    <div id="targets" class="mt-2 grid gap-2 sm:grid-cols-2 [&>*]:min-w-0"></div>
-  </section>
+    <section id="strat-wrap" class="mt-4 hidden rounded-xl border border-slate-800 bg-slate-900/50 p-5">
+      <h2 class="text-sm font-medium text-slate-300">Цена главного решения в архитектуре</h2>
+      <p class="mt-1 text-xs text-slate-500">
+        Пилоты покрывают не все тарифы. Переносить ли подтверждённый вывод на весь сегмент —
+        единственный параметр, который реально меняет результат.
+      </p>
+      <div id="strat" class="mt-4 grid gap-3 sm:grid-cols-2"></div>
+    </section>
 
-  <section id="chart-wrap" class="mt-4 hidden rounded-xl border border-slate-800 bg-slate-900/50 p-5">
-    <h2 class="text-sm font-medium text-slate-300">Разведка: результат каждого пилота</h2>
-    <p class="mt-1 text-xs text-slate-500">
-      Пилоты идут каналом push — он бесплатен, поэтому разведка тратит только охват.
-      Красные столбцы — гипотезы, которые агент отбросил.
-    </p>
-    <div class="mt-4 h-64"><canvas id="pilots"></canvas></div>
-  </section>
-
-  <section id="plan-wrap" class="mt-4 hidden rounded-xl border border-slate-800 bg-slate-900/50 p-5">
-    <h2 class="text-sm font-medium text-slate-300">План кампаний</h2>
-    <div class="mt-4 overflow-x-auto">
-      <table class="w-full text-sm">
-        <thead class="text-left text-xs uppercase tracking-wide text-slate-500">
-          <tr class="border-b border-slate-800">
-            <th class="py-2 pr-4 font-medium">Кампания</th>
-            <th class="py-2 pr-4 font-medium">Канал</th>
-            <th class="py-2 pr-4 text-right font-medium">Контактов</th>
-            <th class="py-2 pr-4 text-right font-medium">Затраты</th>
-            <th class="py-2 text-right font-medium">Прирост</th>
-          </tr>
-        </thead>
-        <tbody id="plan" class="divide-y divide-slate-800"></tbody>
-      </table>
-    </div>
-  </section>
-
-  <section id="why-wrap" class="mt-4 hidden rounded-xl border border-slate-800 bg-slate-900/50 p-5">
-    <h2 class="text-sm font-medium text-slate-300">Обоснование плана</h2>
-    <p class="mt-1 text-xs text-slate-500">
-      Все числа посчитаны в коде. Модель их только пересказывает и на решения не влияет.
-    </p>
-    <div id="why" class="mt-3 space-y-2 text-sm leading-relaxed text-slate-300"></div>
+    <section id="chart-wrap" class="mt-4 hidden rounded-xl border border-slate-800 bg-slate-900/50 p-5">
+      <h2 class="text-sm font-medium text-slate-300">Разведка: результат каждого пилота</h2>
+      <p class="mt-1 text-xs text-slate-500">
+        Пилоты идут бесплатным каналом push, поэтому разведка тратит охват, но не бюджет.
+        Красные столбцы — гипотезы, которые агент проверил и отбросил.
+      </p>
+      <div class="mt-4 h-64"><canvas id="pilots"></canvas></div>
+    </section>
   </section>
 
 </main>
 
 <footer class="mx-auto max-w-6xl px-4 pb-10 text-xs text-slate-600">
-  Интерфейс — надстройка над той же логикой, что и в CLI.
-  Сдача работает без веба: <span class="font-mono text-slate-500">python local_eval.py</span>
+  Все числа считает Python. Модель только объясняет их словами и на решения не влияет.
+  Сдача работает без интерфейса: <span class="font-mono text-slate-500">python local_eval.py</span>
 </footer>
 
 <script>
 const $ = (s) => document.querySelector(s);
 const fmt = (n) => Math.round(n).toLocaleString('ru-RU').replace(/,/g, ' ');
+const SEED = 42;
 const CHANNELS = {
-  push: ['push', 'bg-slate-700 text-slate-200'],
-  sms: ['SMS · 4', 'bg-sky-900 text-sky-200'],
-  digital_ads: ['реклама · 22', 'bg-violet-900 text-violet-200'],
-  call: ['звонок · 160', 'bg-amber-900 text-amber-200'],
+  push: ['push, бесплатно', 'bg-slate-700 text-slate-200'],
+  sms: ['SMS, 4 у.е.', 'bg-sky-900 text-sky-200'],
+  digital_ads: ['реклама, 22 у.е.', 'bg-violet-900 text-violet-200'],
+  call: ['звонок, 160 у.е.', 'bg-amber-900 text-amber-200'],
 };
-let chart = null;
+const SEG_RU = { LOW: 'экономные абоненты', MID: 'средний сегмент', HIGH: 'дорогие абоненты' };
+let chart = null, stabChart = null;
 
-function kpi(label, value, note, tone) {
-  return `<div class="rounded-xl border border-slate-800 bg-slate-900/50 p-4">
-    <div class="text-xs uppercase tracking-wide text-slate-500">${label}</div>
-    <div class="mt-1 break-words font-mono text-2xl ${tone}">${value}</div>
-    <div class="mt-1 text-xs text-slate-500">${note}</div>
-  </div>`;
+function selectTab(name) {
+  document.querySelectorAll('.tab').forEach((b) => {
+    const on = b.dataset.tab === name;
+    b.className = 'tab' + (on ? ' tab-active' : '');
+  });
+  document.querySelectorAll('[data-panel]').forEach((p) => {
+    p.classList.toggle('hidden', p.dataset.panel !== name);
+  });
+}
+document.querySelectorAll('.tab').forEach((b) =>
+  b.addEventListener('click', () => selectTab(b.dataset.tab)));
+
+function card(label, value, note, tone) {
+  // компонент stat из DaisyUI: своей вёрстки не пишем, только классы
+  return '<div class="stat rounded-xl border border-slate-800 bg-slate-900/50">' +
+    '<div class="stat-title text-slate-500">' + label + '</div>' +
+    '<div class="stat-value break-words font-mono text-2xl ' + tone + '">' + value + '</div>' +
+    '<div class="stat-desc text-slate-500">' + note + '</div></div>';
 }
 
-function render(d) {
-  const green = d.net > 0 ? 'text-emerald-400' : 'text-rose-400';
-  $('#kpis').innerHTML = [
-    kpi('Чистый результат', fmt(d.net), `${d.growth_pct.toFixed(2)}% к baseline`, green),
-    kpi('Прирост ARPU', fmt(d.gross), `затраты ${fmt(d.cost)} у.е.`, 'text-slate-100'),
-    kpi('Охват', fmt(d.unique_customers), `${d.coverage_pct.toFixed(1)}% базы · ${fmt(d.contacts)} контактов`, 'text-slate-100'),
-    kpi('Доля с отрицательным эффектом', d.risk_pct.toFixed(1) + '%', `пилотов ${d.n_pilots} из 20 · ${d.elapsed_s} с`, d.risk_pct < 20 ? 'text-emerald-400' : 'text-amber-400'),
+function renderPlan(d) {
+  const pos = d.net > 0;
+  const word = d.campaigns.length === 1 ? 'кампанию' : 'кампании';
+  $('#verdict').innerHTML =
+    '<p class="text-sm text-slate-400">Рекомендация на следующий месяц</p>' +
+    '<p class="mt-2 text-2xl font-semibold leading-snug">Запустить ' + d.campaigns.length +
+      ' ' + word + ' на ' + fmt(d.unique_customers) + ' абонентов</p>' +
+    '<p class="mt-2 text-lg ' + (pos ? 'text-emerald-400' : 'text-rose-400') + '">' +
+      'Ожидаемый прирост выручки: <span class="font-mono">' + (pos ? '+' : '') + fmt(d.net) +
+      '</span> у.е. <span class="text-sm text-slate-500">за вычетом затрат на связь</span></p>' +
+    '<p class="mt-2 text-sm text-slate-500">Решение собрано по ' + d.n_pilots +
+      ' пилотным замерам на реальной базе, расчёт занял ' + d.elapsed_s + ' с.</p>';
+
+  $('#money').innerHTML = [
+    card('Заработаем', (pos ? '+' : '') + fmt(d.net),
+         d.growth_pct.toFixed(2) + '% к текущей выручке',
+         pos ? 'text-emerald-400' : 'text-rose-400'),
+    card('Потратим на связь', fmt(d.cost),
+         d.budget_used_pct.toFixed(0) + '% бюджета в 100 000', 'text-slate-100'),
+    card('Затронем', fmt(d.unique_customers),
+         d.coverage_pct.toFixed(1) + '% базы, остальных не беспокоим', 'text-slate-100'),
   ].join('');
-  $('#kpis').classList.remove('hidden');
-  $('#kpis').classList.add('grid');
+  $('#money').classList.remove('hidden');
+  $('#money').classList.add('grid');
 
-  $('#cmp-net').textContent = (d.net > 0 ? '+' : '') + fmt(d.net);
-  const width = Math.max(5, Math.min(100, (d.net / 5000000) * 100));
-  $('#compare').classList.remove('hidden');
-  setTimeout(() => { $('#cmp-bar').style.width = width + '%'; }, 50);
+  $('#plan').innerHTML = d.campaigns.map((c) => {
+    const ch = CHANNELS[c.channel] || [c.channel, 'bg-slate-700 text-slate-200'];
+    const segMatch = c.name.match(/^(LOW|MID|HIGH)/);
+    const seg = segMatch ? segMatch[1] : null;
+    const tgtMatch = c.name.match(/to_(tariff_\d+)/);
+    const target = tgtMatch ? tgtMatch[1] : '—';
+    const tone = c.gross_lift > 0 ? 'text-emerald-400' : 'text-rose-400';
+    return '<tr>' +
+      '<td class="break-words py-2 pr-4">' + (SEG_RU[seg] || c.name) + '</td>' +
+      '<td class="py-2 pr-4 font-mono text-xs text-slate-400">' + target + '</td>' +
+      '<td class="py-2 pr-4"><span class="badge badge-sm whitespace-nowrap border-0 ' +
+        ch[1] + '">' + ch[0] + '</span></td>' +
+      '<td class="py-2 pr-4 text-right font-mono">' + fmt(c.contacts) + '</td>' +
+      '<td class="py-2 pr-4 text-right font-mono text-slate-400">' + fmt(c.cost) + '</td>' +
+      '<td class="py-2 text-right font-mono ' + tone + '">' +
+        (c.gross_lift > 0 ? '+' : '') + fmt(c.gross_lift) + '</td></tr>';
+  }).join('');
+  $('#plan-wrap').classList.remove('hidden');
 
-  const labels = d.pilots.map((p, i) => 'П' + (i + 1));
-  const values = d.pilots.map((p) => p.gross_lift);
+  const lines = (d.explanation || '').split('\n').filter(Boolean);
+  $('#why').innerHTML = lines.map((l) =>
+    '<p class="break-words">' + l.replace(/\*\*(.+?)\*\*/g, '<b class="text-slate-100">$1</b>') + '</p>'
+  ).join('');
+  $('#why-wrap').classList.toggle('hidden', lines.length === 0);
+
   if (chart) chart.destroy();
+  const values = d.pilots.map((p) => p.gross_lift);
   chart = new Chart($('#pilots'), {
     type: 'bar',
     data: {
-      labels,
+      labels: d.pilots.map((_, i) => 'П' + (i + 1)),
       datasets: [{
-        data: values,
+        data: values, borderRadius: 4,
         backgroundColor: values.map((v) => v > 0 ? 'rgba(16,185,129,.75)' : 'rgba(244,63,94,.75)'),
-        borderRadius: 4,
       }],
     },
     options: {
       responsive: true, maintainAspectRatio: false,
-      plugins: { legend: { display: false }, tooltip: { callbacks: { label: (c) => fmt(c.raw) + ' у.е.' } } },
+      plugins: { legend: { display: false },
+        tooltip: { callbacks: { label: (c) => fmt(c.raw) + ' у.е.' } } },
       scales: {
         x: { grid: { display: false }, ticks: { color: '#64748b', font: { size: 10 } } },
-        y: { grid: { color: 'rgba(148,163,184,.12)' }, ticks: { color: '#64748b', callback: (v) => fmt(v) } },
+        y: { grid: { color: 'rgba(148,163,184,.12)' },
+             ticks: { color: '#64748b', callback: (v) => fmt(v) } },
       },
     },
   });
   $('#chart-wrap').classList.remove('hidden');
+}
 
-  $('#plan').innerHTML = d.campaigns.map((c) => {
-    const [name, cls] = CHANNELS[c.channel] || [c.channel, 'bg-slate-700 text-slate-200'];
-    const tone = c.gross_lift > 0 ? 'text-emerald-400' : 'text-rose-400';
-    return `<tr>
-      <td class="break-words py-2 pr-4">${c.name}</td>
-      <td class="py-2 pr-4"><span class="whitespace-nowrap rounded-md px-2 py-0.5 text-xs ${cls}">${name}</span></td>
-      <td class="py-2 pr-4 text-right font-mono">${fmt(c.contacts)}</td>
-      <td class="py-2 pr-4 text-right font-mono text-slate-400">${fmt(c.cost)}</td>
-      <td class="py-2 text-right font-mono ${tone}">${fmt(c.gross_lift)}</td>
-    </tr>`;
-  }).join('');
-  $('#plan-wrap').classList.remove('hidden');
-
-  $('#why').innerHTML = (d.explanation || '').split('\n').filter(Boolean)
-    .map((line) => `<p class="break-words">${line.replace(/\*\*(.+?)\*\*/g, '<b class="text-slate-100">$1</b>')}</p>`)
-    .join('');
-  $('#why-wrap').classList.toggle('hidden', !d.explanation);
-
-  $('#hint').classList.add('hidden');
+async function loadSegments() {
+  try {
+    const res = await fetch('/api/insights');
+    const d = await res.json();
+    const skipped = d.segments.filter((s) => s.median_lift <= 0);
+    const share = skipped.reduce((a, s) => a + s.share_pct, 0).toFixed(0);
+    $('#skip-text').textContent =
+      'Смена тарифа не всем приносит пользу. По истории экономные абоненты после перехода ' +
+      'начинают платить заметно больше, а дорогие — меньше: они уходят на тариф выгоднее ' +
+      'прежнего. Поэтому ' + share + '% базы мы сознательно не трогаем: контакт с ними стоил ' +
+      'бы денег и снижал выручку.';
+    $('#segments').innerHTML = d.segments.map((s) => {
+      const good = s.median_lift > 0;
+      return '<div class="rounded-lg border ' + (good ? 'border-emerald-900' : 'border-rose-900') +
+        ' bg-slate-900 p-4"><div class="flex items-center justify-between gap-2">' +
+        '<span class="text-sm font-medium">' + SEG_RU[s.segment] + '</span>' +
+        '<span class="rounded-md bg-slate-800 px-2 py-0.5 text-xs text-slate-400">' +
+          s.share_pct + '% базы</span></div>' +
+        '<div class="mt-2 font-mono text-2xl ' + (good ? 'text-emerald-400' : 'text-rose-400') +
+          '">' + (good ? '+' : '') + (s.median_lift * 100).toFixed(0) + '%</div>' +
+        '<div class="mt-1 text-xs text-slate-500">так меняется их счёт после смены тарифа</div>' +
+        '<div class="mt-2 text-xs ' + (good ? 'text-emerald-500' : 'text-rose-500') + '">' +
+          (good ? 'работаем' : 'не трогаем') + '</div></div>';
+    }).join('');
+    $('#skip-wrap').classList.remove('hidden');
+  } catch (e) {
+    // блок необязательный: план читается и без него
+  }
 }
 
 async function run() {
   const btn = $('#run');
   btn.disabled = true;
   btn.textContent = 'Считаем…';
-  $('#hint').classList.remove('hidden');
-  $('#hint').textContent = 'Агент пилотирует гипотезы…';
   try {
     const res = await fetch('/api/run', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ seed: Number($('#seed').value) || 0 }),
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ seed: SEED }),
     });
     if (!res.ok) throw new Error('HTTP ' + res.status);
-    render(await res.json());
+    renderPlan(await res.json());
   } catch (e) {
-    $('#hint').textContent = 'Ошибка: ' + e.message;
+    $('#verdict').innerHTML = '<p class="text-sm text-rose-400">Ошибка: ' + e.message + '</p>';
   } finally {
     btn.disabled = false;
-    btn.textContent = 'Запустить агента';
+    btn.textContent = 'Пересобрать план';
   }
 }
 
-let stabChart = null;
+const SUGGESTIONS = [
+  'Почему звонок только для маленькой группы?',
+  'Что будет, если урезать бюджет вдвое?',
+  'Почему не охватили всю базу?',
+];
+$('#chips').innerHTML = SUGGESTIONS.map((t) =>
+  '<button class="chip badge badge-outline cursor-pointer py-3 text-xs">' + t + '</button>').join('');
+document.querySelectorAll('.chip').forEach((c) =>
+  c.addEventListener('click', () => { $('#q').value = c.textContent; ask(); }));
+
+async function ask() {
+  const q = $('#q').value.trim();
+  if (!q) return;
+  const btn = $('#ask');
+  btn.disabled = true;
+  btn.textContent = 'Думаем…';
+  $('#answer').classList.remove('hidden');
+  $('#answer').textContent = 'Считаем ответ по фактам плана…';
+  try {
+    const res = await fetch('/api/ask', {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ question: q, seed: SEED }),
+    });
+    const d = await res.json();
+    $('#answer').innerHTML = '<p class="break-words">' + d.answer + '</p>' +
+      (d.model ? '<p class="mt-2 text-xs text-slate-600">модель: ' + d.model + '</p>' : '');
+  } catch (e) {
+    $('#answer').textContent = 'Ошибка: ' + e.message;
+  } finally {
+    btn.disabled = false;
+    btn.textContent = 'Спросить';
+  }
+}
+const wifRows = {};
+async function whatif(budget) {
+  const btns = document.querySelectorAll('.wif');
+  btns.forEach((b) => b.disabled = true);
+  try {
+    const d = await (await fetch('/api/whatif?budget=' + budget)).json();
+    const chans = Object.keys(d.channels).map((k) =>
+      (CHANNELS[k] ? CHANNELS[k][0] : k) + ' ×' + d.channels[k]).join(', ');
+    wifRows[budget] =
+      '<tr><td class="py-2 pr-4 font-mono">' + fmt(d.budget) + '</td>' +
+      '<td class="py-2 pr-4 text-right font-mono text-emerald-400">+' + fmt(d.net) + '</td>' +
+      '<td class="py-2 pr-4 text-right font-mono text-slate-400">' + fmt(d.cost) + '</td>' +
+      '<td class="py-2 pr-4 text-right font-mono">' + fmt(d.customers) + '</td>' +
+      '<td class="py-2 text-xs text-slate-400">' + (chans || '—') + '</td></tr>';
+    $('#wif-rows').innerHTML = Object.keys(wifRows)
+      .sort((a, b) => a - b).map((k) => wifRows[k]).join('');
+    $('#wif-out').classList.remove('hidden');
+  } catch (e) {
+    $('#wif-rows').innerHTML = '<tr><td colspan="5" class="py-2 text-rose-400">Ошибка: ' +
+      e.message + '</td></tr>';
+    $('#wif-out').classList.remove('hidden');
+  } finally {
+    btns.forEach((b) => b.disabled = false);
+  }
+}
+document.querySelectorAll('.wif').forEach((b) =>
+  b.addEventListener('click', () => whatif(b.dataset.budget)));
+
+$('#ask').addEventListener('click', ask);
+$('#q').addEventListener('keydown', (e) => { if (e.key === 'Enter') ask(); });
 
 async function stability() {
   const btn = $('#stab');
@@ -253,23 +420,23 @@ async function stability() {
       ['медиана', fmt(d.median), 'text-slate-100'],
       ['минимум', fmt(d.min), 'text-slate-400'],
       ['максимум', fmt(d.max), 'text-slate-400'],
-      ['в плюс', `${d.positive} из ${d.runs}`, allPos ? 'text-emerald-400' : 'text-amber-400'],
-    ].map(([k, v, tone]) => `<div><span class="text-slate-500">${k}:</span>
-        <span class="ml-1 font-mono ${tone}">${v}</span></div>`).join('');
-
+      ['в плюс', d.positive + ' из ' + d.runs, allPos ? 'text-emerald-400' : 'text-amber-400'],
+    ].map((row) => '<div><span class="text-slate-500">' + row[0] + ':</span>' +
+      '<span class="ml-1 font-mono ' + row[2] + '">' + row[1] + '</span></div>').join('');
     if (stabChart) stabChart.destroy();
     stabChart = new Chart($('#stab-chart'), {
       type: 'line',
       data: {
-        labels: d.nets.map((_, i) => 'seed ' + i),
+        labels: d.nets.map((_, i) => 'прогон ' + (i + 1)),
         datasets: [{
           data: d.nets, borderColor: '#38bdf8', backgroundColor: 'rgba(56,189,248,.15)',
-          fill: true, tension: .3, pointRadius: 4, pointBackgroundColor: '#38bdf8',
+          fill: true, tension: 0.3, pointRadius: 4, pointBackgroundColor: '#38bdf8',
         }],
       },
       options: {
         responsive: true, maintainAspectRatio: false,
-        plugins: { legend: { display: false }, tooltip: { callbacks: { label: (c) => fmt(c.raw) } } },
+        plugins: { legend: { display: false },
+          tooltip: { callbacks: { label: (c) => fmt(c.raw) } } },
         scales: {
           x: { grid: { display: false }, ticks: { color: '#64748b', font: { size: 10 } } },
           y: { beginAtZero: true, grid: { color: 'rgba(148,163,184,.12)' },
@@ -279,44 +446,53 @@ async function stability() {
     });
     $('#stab-wrap').classList.remove('hidden');
   } catch (e) {
-    $('#hint').classList.remove('hidden');
-    $('#hint').textContent = 'Ошибка устойчивости: ' + e.message;
+    $('#stab-summary').innerHTML = '<span class="text-rose-400">Ошибка: ' + e.message + '</span>';
+    $('#stab-wrap').classList.remove('hidden');
   } finally {
     btn.disabled = false;
-    btn.textContent = 'Устойчивость ×5';
+    btn.textContent = 'А это не случайность? · 5 прогонов';
   }
 }
 
-async function insights() {
+async function scenarios() {
+  const btn = $('#scen');
+  btn.disabled = true;
+  btn.textContent = 'Прогоняем…';
+  $('#scen-wrap').classList.remove('hidden');
+  $('#scen-list').innerHTML =
+    '<p class="text-sm text-slate-500">Шесть миров по два прогона, около полуминуты…</p>';
   try {
-    const d = await (await fetch('/api/insights')).json();
-    $('#segments').innerHTML = d.segments.map((s) => {
-      const good = s.median_lift > 0;
-      const tone = good ? 'text-emerald-400' : 'text-rose-400';
-      const border = good ? 'border-emerald-900' : 'border-rose-900';
-      return `<div class="rounded-lg border ${border} bg-slate-900 p-4">
-        <div class="flex items-center justify-between gap-2">
-          <span class="font-medium">${s.segment}</span>
-          <span class="rounded-md bg-slate-800 px-2 py-0.5 text-xs text-slate-400">${s.share_pct}% базы</span>
-        </div>
-        <div class="mt-2 font-mono text-2xl ${tone}">${good ? '+' : ''}${s.median_lift.toFixed(2)}</div>
-        <div class="mt-1 text-xs text-slate-500">
-          медианный прирост · ${fmt(s.customers)} абонентов · ARPU ${fmt(s.mean_arpu)}
-        </div>
-        <div class="mt-2 text-xs ${good ? 'text-emerald-500' : 'text-rose-500'}">
-          ${good ? 'работаем' : 'исключён из кандидатов'}
-        </div>
-      </div>`;
+    const d = await (await fetch('/api/scenarios')).json();
+    const badge = $('#scen-badge');
+    badge.textContent = 'пройдено ' + d.passed + ' из ' + d.total;
+    badge.className = 'rounded-md px-2 py-0.5 text-xs ' +
+      (d.passed === d.total ? 'bg-emerald-900 text-emerald-200' : 'bg-rose-900 text-rose-200');
+    const max = Math.max.apply(null, d.worlds.map((w) => Math.abs(w.net)).concat([1]));
+    $('#scen-list').innerHTML = d.worlds.map((w) => {
+      const pos = w.net > 0;
+      const pct = Math.max(2, Math.round((Math.abs(w.net) / max) * 100));
+      const eff = Object.keys(w.effects).map((k) =>
+        k + ' ' + (w.effects[k] > 0 ? '+' : '') + w.effects[k]).join(' · ');
+      return '<div class="rounded-lg border border-slate-800 bg-slate-900 p-3">' +
+        '<div class="flex flex-wrap items-baseline justify-between gap-2">' +
+        '<span class="text-sm font-medium">' + w.name + '</span>' +
+        '<span class="font-mono text-sm ' + (pos ? 'text-emerald-400' : 'text-rose-400') + '">' +
+          (pos ? '+' : '') + fmt(w.net) + '</span></div>' +
+        '<div class="mt-2 h-1.5 overflow-hidden rounded-full bg-slate-800">' +
+        '<div class="h-full rounded-full ' + (pos ? 'bg-emerald-500' : 'bg-rose-500') +
+          ' w-[' + pct + '%]"></div></div>' +
+        '<div class="mt-2 flex flex-wrap items-center gap-x-3 gap-y-1 text-xs text-slate-500">' +
+        '<span>эффект: ' + eff + '</span><span>ожидаем: ' + w.expect + '</span>' +
+        '<span>кампаний ' + w.campaigns + ' · пилотов ' + w.pilots + '</span>' +
+        '<span class="' + (w.ok ? 'text-emerald-500' : 'text-rose-500') + '">' +
+          (w.ok ? 'ok' : 'ПРОВАЛ') + '</span></div></div>';
     }).join('');
-
-    $('#targets').innerHTML = d.targets.map((t) => `
-      <div class="flex items-center justify-between gap-3 rounded-lg border border-slate-800 bg-slate-900 px-3 py-2 text-sm">
-        <span class="truncate"><span class="text-slate-500">${t.segment} →</span> ${t.target}</span>
-        <span class="shrink-0 font-mono text-emerald-400">+${t.median_lift.toFixed(2)}
-          <span class="text-xs text-slate-600">n=${t.n}</span></span>
-      </div>`).join('');
-    $('#data-wrap').classList.remove('hidden');
-  } catch (e) { /* разбор данных не критичен для основного сценария */ }
+  } catch (e) {
+    $('#scen-list').innerHTML = '<p class="text-sm text-rose-400">Ошибка: ' + e.message + '</p>';
+  } finally {
+    btn.disabled = false;
+    btn.textContent = 'А если данные другие? · 6 миров';
+  }
 }
 
 async function compare() {
@@ -325,39 +501,41 @@ async function compare() {
   btn.textContent = 'Считаем…';
   try {
     const d = await (await fetch('/api/compare')).json();
-    const card = (title, v, note, best) => `
-      <div class="rounded-lg border ${best ? 'border-emerald-800 bg-emerald-950/30' : 'border-slate-800 bg-slate-900'} p-4">
-        <div class="flex items-center justify-between gap-2">
-          <span class="text-sm font-medium">${title}</span>
-          ${best ? '<span class="rounded-md bg-emerald-900 px-2 py-0.5 text-xs text-emerald-200">выбрано</span>' : ''}
-        </div>
-        <div class="mt-2 font-mono text-2xl ${best ? 'text-emerald-400' : 'text-slate-300'}">${fmt(v.median)}</div>
-        <div class="mt-1 text-xs text-slate-500">
-          медиана 5 прогонов · охват ${fmt(v.avg_reach)} · в плюс ${v.positive} из 5
-        </div>
-        <div class="mt-1 text-xs text-slate-600">минимум ${fmt(v.min)}</div>
-        <div class="mt-2 text-xs text-slate-500">${note}</div>
-      </div>`;
+    const card2 = (title, v, note, best) =>
+      '<div class="rounded-lg border ' +
+        (best ? 'border-emerald-800 bg-emerald-950/30' : 'border-slate-800 bg-slate-900') +
+        ' p-4"><div class="flex items-center justify-between gap-2">' +
+      '<span class="text-sm font-medium">' + title + '</span>' +
+      (best ? '<span class="rounded-md bg-emerald-900 px-2 py-0.5 text-xs text-emerald-200">выбрано</span>' : '') +
+      '</div><div class="mt-2 font-mono text-2xl ' +
+        (best ? 'text-emerald-400' : 'text-slate-300') + '">' + fmt(v.median) + '</div>' +
+      '<div class="mt-1 text-xs text-slate-500">медиана 5 прогонов · охват ' + fmt(v.avg_reach) +
+        ' · в плюс ' + v.positive + ' из 5</div>' +
+      '<div class="mt-2 text-xs text-slate-500">' + note + '</div></div>';
     $('#strat').innerHTML =
-      card('Перенос вывода на сегмент', d.transfer,
-           `Знание «сегмент работает» применяем ко всем его тарифам, кроме уверенно убыточных. Плюс ${d.delta_pct}% к результату.`, true) +
-      card('Только измеренные группы', d.measured_only,
-           'Действуем строго по пилотированным группам. Безопаснее, но охват заметно меньше.', false);
+      card2('Переносим вывод на сегмент', d.transfer,
+        'Подтверждённое на части тарифов применяем ко всему сегменту, кроме заведомо убыточных. Плюс ' +
+        d.delta_pct + '% к результату.', true) +
+      card2('Только измеренные группы', d.measured_only,
+        'Действуем строго по проверенным группам. Безопаснее, но охват заметно меньше.', false);
     $('#strat-wrap').classList.remove('hidden');
   } catch (e) {
-    $('#hint').classList.remove('hidden');
-    $('#hint').textContent = 'Ошибка сравнения: ' + e.message;
+    $('#strat').innerHTML = '<p class="text-sm text-rose-400">Ошибка: ' + e.message + '</p>';
+    $('#strat-wrap').classList.remove('hidden');
   } finally {
     btn.disabled = false;
-    btn.textContent = 'Сравнить стратегии';
+    btn.textContent = 'А почему так, а не иначе? · стратегии';
   }
 }
 
 $('#run').addEventListener('click', run);
 $('#stab').addEventListener('click', stability);
+$('#scen').addEventListener('click', scenarios);
 $('#cmp').addEventListener('click', compare);
+
+selectTab('plan');
 run();
-insights();
+loadSegments();
 </script>
 </body>
 </html>

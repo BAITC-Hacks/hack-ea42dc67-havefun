@@ -49,6 +49,9 @@ PILOT_CHANNEL = "push"          # бесплатно по деньгам
 TARGETS_PER_GROUP = 1           # сколько целевых тарифов проверяем на группу
 MIN_HISTORY_ROWS = 30           # минимум наблюдений в истории для приора
 CONFIDENCE_Z = 1.0              # запас на шум при отборе
+RESERVED_PILOTS = 5             # пилоты на проверку сегментов, забракованных приором
+EXPLORE_PILOT_SIZE = 100        # разведка «против приора» — половинным пилотом
+EXPLORE_GIVE_UP = 2             # подряд явно убыточных — прекращаем эту разведку
 # Переносить ли подтверждённый вывод на непилотированные исходные тарифы
 # внутри сегмента. True — больше охват, выше риск; False — только измеренное.
 TRANSFER_TO_SEGMENT = os.environ.get('TRANSFER_TO_SEGMENT', '1') == '1'
@@ -126,26 +129,46 @@ def build_candidates(profile: pd.DataFrame, prior: pd.DataFrame) -> list[dict]:
         sub = sub[sub["prior"] > 0].sort_values("prior", ascending=False)
         targets_by_seg[str(seg)] = list(zip(sub["tariff_plan_code_to"], sub["prior"]))
 
-    cands = []
+    # лучшая цель для сегмента без положительного приора — наименее плохая
+    fallback_by_seg: dict[str, str] = {}
+    for seg, sub in prior.groupby("arpu_segment", observed=True):
+        best = sub.sort_values("prior", ascending=False)
+        if len(best):
+            fallback_by_seg[str(seg)] = best.iloc[0]["tariff_plan_code_to"]
+
+    cands, explore = [], []
     for _, r in groups.iterrows():
         seg = str(r["arpu_segment"])
-        for target, p in targets_by_seg.get(seg, [])[:TARGETS_PER_GROUP]:
-            if target == r["current_tariff"]:
-                continue
-            cands.append({
-                "current_tariff": r["current_tariff"],
-                "arpu_segment": seg,
-                "target_tariff": target,
-                "size": int(r["size"]),
-                "arpu": float(r["arpu"]),
-                "prior": float(p),
-            })
+        options = targets_by_seg.get(seg, [])[:TARGETS_PER_GROUP]
+        if options:
+            for target, p in options:
+                if target == r["current_tariff"]:
+                    continue
+                cands.append({
+                    "current_tariff": r["current_tariff"], "arpu_segment": seg,
+                    "target_tariff": target, "size": int(r["size"]),
+                    "arpu": float(r["arpu"]), "prior": float(p),
+                })
+        else:
+            # Сегмент забракован историей. Но история описывает ДРУГУЮ выборку,
+            # и на судействе эффекты другие: отказ от проверки — это ставка на
+            # то, что история не врёт. Поэтому часть пилотов тратим на такие
+            # сегменты. Стоит это дёшево (пилот каналом push бесплатен),
+            # а выигрыш велик: HIGH — 59% базы.
+            target = fallback_by_seg.get(seg)
+            if target and target != r["current_tariff"]:
+                explore.append({
+                    "current_tariff": r["current_tariff"], "arpu_segment": seg,
+                    "target_tariff": target, "size": int(r["size"]),
+                    "arpu": float(r["arpu"]), "prior": 0.0,
+                })
 
-    # ожидаемая ценность гипотезы: эффект × охват × средний ARPU.
-    # Сегменты с отрицательным приором (HIGH) сюда не попадают вовсе —
-    # именно на них наивный агент, гоняющийся за охватом, теряет деньги.
+    # ожидаемая ценность гипотезы: эффект × охват × средний ARPU
     cands.sort(key=lambda c: -c["prior"] * min(c["size"], MAX_PER_CAMPAIGN) * c["arpu"])
-    return cands
+    explore.sort(key=lambda c: -min(c["size"], MAX_PER_CAMPAIGN) * c["arpu"])
+
+    keep = max(0, N_PILOTS - RESERVED_PILOTS)
+    return cands[:keep] + explore[:RESERVED_PILOTS] + cands[keep:]
 
 
 # ── Шаг 3. Экономика канала ───────────────────────────────────────────────
@@ -256,14 +279,21 @@ class Agent:
 
         # ── разведка ──────────────────────────────────────────────────────
         measured = []
+        explore_failures = 0
         for cand in candidates[:N_PILOTS]:
             if getattr(env, "pilots_left", 0) <= 0:
                 break
+            # Гипотеза «против приора»: проверяем её половинным пилотом, а если
+            # подряд приходят явно убыточные результаты — прекращаем. Пилоты
+            # идут в зачёт, и упорствовать в заведомо плохом сегменте дорого.
+            is_explore = cand.get("prior", 1.0) == 0.0
+            if is_explore and explore_failures >= EXPLORE_GIVE_UP:
+                continue
             try:
                 res = env.run_pilot(
                     target_tariff=cand["target_tariff"],
                     channel=PILOT_CHANNEL,
-                    n_customers=PILOT_SIZE,
+                    n_customers=EXPLORE_PILOT_SIZE if is_explore else PILOT_SIZE,
                     filter_arpu_segment=cand["arpu_segment"],
                     filter_current_tariff=cand["current_tariff"],
                 )
@@ -277,6 +307,8 @@ class Agent:
             # пересчёт наблюдения на «канал-независимую» величину
             base = observed / CHANNELS[PILOT_CHANNEL]["mult"]
             base_lo = (observed - CONFIDENCE_Z * noise) / CHANNELS[PILOT_CHANNEL]["mult"]
+            if is_explore and base + CONFIDENCE_Z * noise / CHANNELS[PILOT_CHANNEL]["mult"] < 0:
+                explore_failures += 1
             measured.append({**cand, "base": base, "base_lo": base_lo, "n": n})
 
         if not measured:
@@ -327,7 +359,12 @@ class Agent:
             bad = {r["current_tariff"] for r in rows
                    if r["base"] + CONFIDENCE_Z * PER_CUSTOMER_STD / np.sqrt(r["n"]) / 0.5 < 0}
             seg_rows = profile[profile["arpu_segment"] == seg]
-            if TRANSFER_TO_SEGMENT:
+            # Перенос на весь сегмент — сильное обобщение, и оно уместно
+            # только там, где приор и пилот говорят одно и то же. Вывод,
+            # полученный ВОПРЕКИ приору, держим на измеренных группах:
+            # ложный сигнал по HIGH иначе раздувается на 13 918 абонентов.
+            against_prior = all(r.get("prior", 1.0) == 0.0 for r in positives)
+            if TRANSFER_TO_SEGMENT and not against_prior:
                 known = set(seg_rows["current_tariff"].dropna().astype(str))
             else:
                 known = {r["current_tariff"] for r in positives}
