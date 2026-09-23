@@ -40,7 +40,10 @@
     <div id="money" class="mt-4 hidden gap-3 sm:grid-cols-3"></div>
 
     <section id="plan-wrap" class="mt-4 hidden rounded-xl border border-slate-800 bg-slate-900/50 p-5">
-      <h2 class="text-sm font-medium text-slate-300">Что запускаем</h2>
+      <div class="flex flex-wrap items-center justify-between gap-2">
+        <h2 class="text-sm font-medium text-slate-300">Что запускаем</h2>
+        <a href="/api/plan.csv" class="btn btn-xs btn-outline" download>Скачать план, CSV</a>
+      </div>
       <div class="mt-4 overflow-x-auto">
         <table class="table table-sm w-full">
           <thead class="text-left text-xs uppercase tracking-wide text-slate-500">
@@ -139,6 +142,35 @@
         </button>
       </div>
     </div>
+
+    <section id="learn-wrap" class="mt-4 hidden rounded-xl border border-slate-800 bg-slate-900/50 p-5">
+      <div class="flex flex-wrap items-center justify-between gap-3">
+        <h2 class="text-sm font-medium text-slate-300">Как агент менял мнение</h2>
+        <span id="learn-badge" class="badge badge-sm"></span>
+      </div>
+      <p class="mt-1 text-xs text-slate-500">
+        Обучение здесь происходит внутри прогона, а не заранее на истории: модель, обученная на
+        выданных данных, подогналась бы под распределение, которого на проверке не будет.
+        Приор задаёт лишь порядок проверки — дальше решает измерение.
+        Строки с меткой «против приора» — гипотезы, которые история считала безнадёжными,
+        но агент всё равно их проверил.
+      </p>
+      <div class="mt-4 overflow-x-auto">
+        <table class="table table-xs w-full">
+          <thead class="text-left text-xs uppercase tracking-wide text-slate-500">
+            <tr class="border-b border-slate-800">
+              <th class="py-2 pr-3 font-medium">Гипотеза</th>
+              <th class="py-2 pr-3 text-right font-medium">Группа</th>
+              <th class="py-2 pr-3 text-right font-medium">Приор</th>
+              <th class="py-2 pr-3 text-right font-medium">Пилот</th>
+              <th class="py-2 pr-3 text-right font-medium">Оценка</th>
+              <th class="py-2 font-medium">Решение</th>
+            </tr>
+          </thead>
+          <tbody id="learn" class="divide-y divide-slate-800"></tbody>
+        </table>
+      </div>
+    </section>
 
     <section id="scen-wrap" class="mt-4 hidden rounded-xl border border-slate-800 bg-slate-900/50 p-5">
       <div class="flex flex-wrap items-center justify-between gap-3">
@@ -253,8 +285,10 @@ function renderPlan(d) {
     const tgtMatch = c.name.match(/to_(tariff_\d+)/);
     const target = tgtMatch ? tgtMatch[1] : '—';
     const tone = c.gross_lift > 0 ? 'text-emerald-400' : 'text-rose-400';
+    const part = c.name.indexOf('_part') >= 0 ? ' <span class="text-xs text-slate-500">' +
+      '(остаток сегмента)</span>' : '';
     return '<tr>' +
-      '<td class="break-words py-2 pr-4">' + (SEG_RU[seg] || c.name) + '</td>' +
+      '<td class="break-words py-2 pr-4">' + (SEG_RU[seg] || c.name) + part + '</td>' +
       '<td class="py-2 pr-4 font-mono text-xs text-slate-400">' + target + '</td>' +
       '<td class="py-2 pr-4"><span class="badge badge-sm whitespace-nowrap border-0 ' +
         ch[1] + '">' + ch[0] + '</span></td>' +
@@ -294,6 +328,35 @@ function renderPlan(d) {
     },
   });
   $('#chart-wrap').classList.remove('hidden');
+  renderLearning(d.learning || []);
+}
+
+function renderLearning(rows) {
+  if (!rows.length) { $('#learn-wrap').classList.add('hidden'); return; }
+  const ok = rows.filter((r) => r.accepted).length;
+  const against = rows.filter((r) => r.against_prior).length;
+  const badge = $('#learn-badge');
+  badge.textContent = 'подтверждено ' + ok + ' из ' + rows.length +
+    ' · против приора ' + against;
+  badge.className = 'badge badge-sm badge-outline';
+
+  $('#learn').innerHTML = rows.map((r) => {
+    const tone = r.accepted ? 'text-emerald-400' : 'text-slate-500';
+    const mark = r.against_prior
+      ? ' <span class="badge badge-xs border-amber-700 text-amber-300">против приора</span>' : '';
+    const sign = (v) => (v > 0 ? '+' : '') + v.toFixed(3);
+    return '<tr class="' + (r.accepted ? '' : 'opacity-70') + '">' +
+      '<td class="py-1.5 pr-3 break-words"><span class="text-slate-300">' + r.segment + '</span> ' +
+        '<span class="font-mono text-xs text-slate-500">' + r.from_tariff + ' → ' +
+        r.to_tariff + '</span>' + mark + '</td>' +
+      '<td class="py-1.5 pr-3 text-right font-mono text-slate-400">' + fmt(r.group_size) + '</td>' +
+      '<td class="py-1.5 pr-3 text-right font-mono text-slate-500">' + r.prior.toFixed(2) + '</td>' +
+      '<td class="py-1.5 pr-3 text-right font-mono">' + sign(r.observed) +
+        '<span class="text-xs text-slate-600"> n=' + r.pilot_n + '</span></td>' +
+      '<td class="py-1.5 pr-3 text-right font-mono ' + tone + '">' + sign(r.estimate) + '</td>' +
+      '<td class="py-1.5 text-xs ' + tone + '">' + r.verdict + '</td></tr>';
+  }).join('');
+  $('#learn-wrap').classList.remove('hidden');
 }
 
 async function loadSegments() {

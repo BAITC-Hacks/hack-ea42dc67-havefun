@@ -58,8 +58,9 @@ def run(req: RunRequest) -> dict:
 
     started = time.time()
     log = io.StringIO()
+    agent = A.Agent()          # держим ссылку, чтобы забрать журнал обучения
     with contextlib.redirect_stdout(log):
-        result = evaluate_agent(A.Agent(), seed=req.seed, verbose=False)
+        result = evaluate_agent(agent, seed=req.seed, verbose=False)
     elapsed = time.time() - started
 
     text = log.getvalue()
@@ -99,6 +100,7 @@ def run(req: RunRequest) -> dict:
         "campaigns": campaigns,
         "pilots": pilots,
         "explanation": explanation,
+        "learning": getattr(agent, "learning_log", []),
     }
 
 
@@ -280,6 +282,45 @@ def scenarios_api() -> dict:
         })
     return {"baseline": baseline, "worlds": worlds,
             "passed": sum(1 for w in worlds if w["ok"]), "total": len(worlds)}
+
+
+@app.get("/api/plan.csv")
+def plan_csv(seed: int = 42):
+    """Выгрузка плана для аналитика: человекочитаемые колонки.
+
+    Это не файл сдачи. Файл сдачи — submission.csv, он в формате
+    организаторов и делается командой make_submission.py.
+    """
+    import csv
+
+    from fastapi.responses import StreamingResponse
+
+    data = run(RunRequest(seed=seed))
+    seg_ru = {"LOW": "экономные абоненты", "MID": "средний сегмент",
+              "HIGH": "дорогие абоненты"}
+    chan_ru = {"push": "push (бесплатно)", "sms": "SMS (4 у.е.)",
+               "digital_ads": "реклама (22 у.е.)", "call": "звонок (160 у.е.)"}
+
+    buf = io.StringIO()
+    w = csv.writer(buf, delimiter=";")
+    w.writerow(["Кому предлагаем", "Целевой тариф", "Канал", "Человек",
+                "Затраты, у.е.", "Прирост выручки, у.е."])
+    for c in data["campaigns"]:
+        name = c["name"]
+        seg = next((k for k in seg_ru if name.startswith(k)), None)
+        target = name.split("to_")[-1].split("_part")[0] if "to_" in name else ""
+        part = " (часть 2)" if "_part" in name else ""
+        w.writerow([(seg_ru.get(seg, name)) + part, target,
+                    chan_ru.get(c["channel"], c["channel"]),
+                    c["contacts"], round(c["cost"]), round(c["gross_lift"])])
+    w.writerow([])
+    w.writerow(["Итого прирост за вычетом затрат", "", "", "", "", round(data["net"])])
+    w.writerow(["Охват, абонентов", "", "", data["unique_customers"], "", ""])
+
+    buf.seek(0)
+    return StreamingResponse(
+        iter([buf.getvalue()]), media_type="text/csv; charset=utf-8",
+        headers={"Content-Disposition": 'attachment; filename="plan.csv"'})
 
 
 @app.get("/api/whatif")

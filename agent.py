@@ -139,11 +139,14 @@ def build_candidates(profile: pd.DataFrame, prior: pd.DataFrame) -> list[dict]:
     cands, explore = [], []
     for _, r in groups.iterrows():
         seg = str(r["arpu_segment"])
-        options = targets_by_seg.get(seg, [])[:TARGETS_PER_GROUP]
+        # Берём лучшие цели сегмента, пропуская ту, на которой группа уже
+        # сидит: предлагать абоненту его текущий тариф бессмысленно. Раньше
+        # такая группа выпадала целиком — а это, например, 1 720 абонентов
+        # среднего сегмента, уже находящихся на его лучшем тарифе.
+        options = [(t, p) for t, p in targets_by_seg.get(seg, [])
+                   if t != r["current_tariff"]][:TARGETS_PER_GROUP]
         if options:
             for target, p in options:
-                if target == r["current_tariff"]:
-                    continue
                 cands.append({
                     "current_tariff": r["current_tariff"], "arpu_segment": seg,
                     "target_tariff": target, "size": int(r["size"]),
@@ -244,7 +247,16 @@ def validate_plan(plan: list[dict], env) -> list[dict]:
 
 
 class Agent:
-    """Исследует эффекты пилотами и возвращает план кампаний."""
+    """Исследует эффекты пилотами и возвращает план кампаний.
+
+    После вызова `act` журнал обучения доступен в `self.learning_log`:
+    по каждой гипотезе видно, что предсказывал приор, что показал пилот
+    и какое решение принято. Это и есть обучение агента — оно происходит
+    внутри прогона, а не заранее на истории.
+    """
+
+    def __init__(self) -> None:
+        self.learning_log: list[dict] = []
 
     @staticmethod
     def _campaign(c: dict, sources: list[str], reach: int, idx: int) -> dict:
@@ -277,7 +289,24 @@ class Agent:
             print("[agent] кандидатов нет — возвращаем пустой план")
             return []
 
-        # ── разведка ──────────────────────────────────────────────────────
+        measured = self._explore(env, candidates)
+        if not measured:
+            print("[agent] ни один пилот не удался — плана нет")
+            return []
+
+        campaigns = self._select(profile, measured)
+        if not campaigns:
+            return []
+
+        return self._build_plan(env, profile, campaigns)
+
+    # ── шаг 2: разведка ───────────────────────────────────────────────
+    def _explore(self, env, candidates: list[dict]) -> list[dict]:
+        """Пилотирует гипотезы по убыванию ожидаемой ценности.
+
+        Пилот каналом push бесплатен по деньгам, поэтому разведка
+        ограничена только числом пилотов и охватом.
+        """
         measured = []
         explore_failures = 0
         for cand in candidates[:N_PILOTS]:
@@ -309,12 +338,15 @@ class Agent:
             base_lo = (observed - CONFIDENCE_Z * noise) / CHANNELS[PILOT_CHANNEL]["mult"]
             if is_explore and base + CONFIDENCE_Z * noise / CHANNELS[PILOT_CHANNEL]["mult"] < 0:
                 explore_failures += 1
-            measured.append({**cand, "base": base, "base_lo": base_lo, "n": n})
+            measured.append({**cand, "base": base, "base_lo": base_lo, "n": n,
+                             "noise": noise / CHANNELS[PILOT_CHANNEL]["mult"],
+                             "observed": observed})
 
-        if not measured:
-            print("[agent] ни один пилот не удался — плана нет")
-            return []
+        return measured
 
+    # ── шаг 3: отбор гипотез и сборка кампаний ────────────────────────
+    def _select(self, profile, measured: list[dict]) -> list[dict]:
+        """Оставляет подтверждённые гипотезы и собирает из них кампании."""
         # ── отбор: только уверенно положительные ──────────────────────────
         # на группу оставляем лучшую из проверенных гипотез: сегменты
         # не должны пересекаться, иначе платим за абонента дважды
@@ -325,6 +357,32 @@ class Agent:
             if cur is None or m["base_lo"] > cur["base_lo"]:
                 best_per_group[key] = m
         good = [m for m in best_per_group.values() if m["base_lo"] > 0]
+
+        # Журнал обучения: что предсказывал приор, что показал пилот, как
+        # изменилось решение. Это единственное место, где агент реально
+        # меняет мнение, и его стоит показывать целиком.
+        self.learning_log = []
+        for m in measured:
+            accepted = m in best_per_group.values() and m["base_lo"] > 0
+            against = m.get("prior", 1.0) == 0.0
+            self.learning_log.append({
+                "segment": m["arpu_segment"],
+                "from_tariff": m["current_tariff"],
+                "to_tariff": m["target_tariff"],
+                "group_size": m["size"],
+                "prior": round(float(m.get("prior", 0.0)), 4),
+                "against_prior": against,
+                "pilot_n": m["n"],
+                "observed": round(m["observed"], 4),
+                "estimate": round(m["base"], 4),
+                "lower_bound": round(m["base_lo"], 4),
+                "noise": round(m["noise"], 4),
+                "accepted": bool(accepted),
+                "verdict": ("подтверждено" if accepted
+                            else ("отброшено: эффект в пределах шума"
+                                  if m["base"] > 0 else "отброшено: эффект отрицательный")),
+            })
+
         print(f"[agent] пилотов: {len(measured)}, прошли порог: {len(good)}")
         if not good:
             return []
@@ -388,6 +446,11 @@ class Agent:
             })
         campaigns.sort(key=lambda c: -c["base"] * c["arpu"])
 
+        return campaigns
+
+    # ── шаг 4: охват и бюджет ─────────────────────────────────────────
+    def _build_plan(self, env, profile, campaigns: list[dict]) -> list[dict]:
+        """Заполняет охват дешёвым каналом, затем тратит бюджет на апгрейд."""
         # ── шаг 2: заполняем охват, канал пока самый дешёвый ──────────────
         contacts_left = int(getattr(env, "remaining_contacts", 0))
         budget_left = float(getattr(env, "remaining_budget", 0.0))
@@ -441,8 +504,11 @@ class Agent:
         print(f"[agent] кампаний: {len(plan)}, охват использован: "
               f"{sum(c['reach'] for c in plan)}, бюджет: {spent:.0f}")
 
-        # лимиты применяются по порядку списка — самые ценные вперёд
-        plan.sort(key=lambda c: -c["base"] * c["arpu"] * CHANNELS[c["channel"]]["mult"])
+        # Порядок не меняем: охват распределялся последовательно именно в
+        # этом порядке, и среда применяет лимиты так же. Пересортировка
+        # после распределения привела бы к расхождению запланированного
+        # охвата с фактическим — кампания в конце списка могла бы молча
+        # недополучить контакты, на которые уже заложен бюджет канала.
         result = [{k: v for k, v in c.items() if k not in ("reach", "base", "arpu")}
                   for c in plan]
         return validate_plan(result, env)

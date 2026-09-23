@@ -1,0 +1,18 @@
+# Поднять веб-интерфейс одной командой:
+#   docker compose up
+# Открыть http://localhost:8000
+#
+# Разовые сценарии без веба:
+#   docker compose run --rm agent selfcheck
+#   docker compose run --rm agent scenarios
+services:
+  agent:
+    build: .
+    image: hackalem-agent
+    command: web
+    ports:
+      - "8000:8000"
+    environment:
+      # Ключ нужен только для объяснений на естественном языке.
+      # Без него план считается так же, объяснение собирается по шаблону.
+      - OPENAI_API_KEY=${OPENAI_API_KEY:-}

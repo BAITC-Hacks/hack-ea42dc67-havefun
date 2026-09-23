@@ -46,7 +46,26 @@ def main() -> int:
     check(len(env.pilot_history) > 0, "агент действительно пилотировал",
           f"{len(env.pilot_history)} пилотов")
 
-    print("\n=== 3. Некорректные входные данные ===")
+    print("" + chr(10) + "=== 3. Запланированный охват совпадает с фактическим ===")
+    import contextlib
+    import io as _io
+
+    from local_eval import evaluate_agent
+
+    env5, _ = make_mock_env(seed=5)
+    with contextlib.redirect_stdout(_io.StringIO()):
+        plan5 = A.Agent().act(env5)
+        res5 = evaluate_agent(A.Agent(), seed=5, verbose=False)
+    names = set(c["campaign_name"] for c in plan5)
+    actual = dict((c["name"], c["n_contacts"]) for c in res5["campaigns_detail"]
+                  if not c["name"].startswith("pilot_"))
+    check(set(actual) == names,
+          "среда не отбросила ни одной кампании плана",
+          "в плане %d, в зачёте %d" % (len(names), len(actual)))
+    check(all(not c.get("capped_at_money_budget") for c in res5["campaigns_detail"]),
+          "ни одна кампания не обрезана нехваткой бюджета")
+
+    print("\n=== 4. Некорректные входные данные ===")
     env2, _ = make_mock_env(seed=1)
     env2.customer_profile = env2.customer_profile.iloc[0:0]
     check(A.Agent().act(env2) == [], "пустая аудитория — пустой план, без падения")
@@ -61,7 +80,7 @@ def main() -> int:
     check(A.Agent().act(env4) == [], "нет истории — пустой план, без падения")
     A.HISTORY_PATH = saved
 
-    print("\n=== 4. Валидация плана ===")
+    print("\n=== 5. Валидация плана ===")
     broken = [
         {"campaign_name": "плохой канал", "target_tariff": "tariff_9", "channel": "телепатия"},
         {"campaign_name": "плохой тариф", "target_tariff": "tariff_999", "channel": "sms"},
