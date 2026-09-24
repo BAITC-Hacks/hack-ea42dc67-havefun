@@ -16,7 +16,7 @@
     <div class="flex flex-wrap items-center gap-4">
       <div class="min-w-0 flex-1">
         <h1 class="truncate text-lg font-semibold">План тарифных маркетинговых кампаний</h1>
-        <p class="truncate text-sm text-slate-400">Кому предложить смену тарифа в следующем месяце</p>
+        <p class="truncate text-sm text-slate-400">Синтетический датасет кейса · 23 441 абонент</p>
       </div>
       <button id="run" class="btn btn-sm btn-primary shrink-0">
         Пересобрать план
@@ -96,7 +96,7 @@
     </section>
 
     <section id="skip-wrap" class="mt-4 hidden rounded-xl border border-amber-900/60 bg-amber-950/20 p-5">
-      <h2 class="text-sm font-medium text-amber-200">Почему мы не трогаем больше половины базы</h2>
+      <h2 class="text-sm font-medium text-amber-200">Почему больше половины базы не попала в финальный план</h2>
       <p id="skip-text" class="mt-2 text-sm leading-relaxed text-slate-300"></p>
       <div id="segments" class="mt-4 grid gap-3 sm:grid-cols-3"></div>
     </section>
@@ -206,8 +206,10 @@
     <section id="chart-wrap" class="mt-4 hidden rounded-xl border border-slate-800 bg-slate-900/50 p-5">
       <h2 class="text-sm font-medium text-slate-300">Разведка: результат каждого пилота</h2>
       <p class="mt-1 text-xs text-slate-500">
-        Пилоты идут бесплатным каналом push, поэтому разведка тратит охват, но не бюджет.
-        Красные столбцы — гипотезы, которые агент проверил и отбросил.
+        Здесь то, что <b>наблюдал сам агент</b>, а не истинный эффект из модели среды.
+        Зелёный — гипотеза принята, серый — эффект положительный, но неотличим от шума,
+        красный — эффект отрицательный. Наведите на столбец: видно наблюдение, величину
+        шума и причину решения.
       </p>
       <div class="mt-4 h-64"><canvas id="pilots"></canvas></div>
     </section>
@@ -222,6 +224,8 @@
 
 <script>
 const $ = (s) => document.querySelector(s);
+const esc = (t) => String(t).replace(/[&<>"']/g, (c) =>
+  ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
 const fmt = (n) => Math.round(n).toLocaleString('ru-RU').replace(/,/g, ' ');
 const SEED = 42;
 const CHANNELS = {
@@ -250,36 +254,114 @@ function card(label, value, note, tone) {
   return '<div class="stat rounded-xl border border-slate-800 bg-slate-900/50">' +
     '<div class="stat-title text-slate-500">' + label + '</div>' +
     '<div class="stat-value break-words font-mono text-2xl ' + tone + '">' + value + '</div>' +
-    '<div class="stat-desc text-slate-500">' + note + '</div></div>';
+    '<div class="stat-desc whitespace-normal text-slate-500">' + note + '</div></div>';
+}
+
+// русские числительные: «2 кампании», но «5 кампаний» — иначе заголовок читается как ошибка
+function plural(n, one, few, many) {
+  const a = Math.abs(n) % 100, b = a % 10;
+  if (a > 10 && a < 20) return many;
+  if (b > 1 && b < 5) return few;
+  return b === 1 ? one : many;
+}
+const sumBy = (rows, key) => rows.reduce((a, r) => a + (Number(r[key]) || 0), 0);
+const sign = (v) => (v > 0 ? '+' : '') + fmt(v);
+
+// Блок разбора: заголовок, пояснение и пары «показатель — значение».
+// Значения уже отформатированы числами, текст — только наш собственный.
+function breakdown(title, note, rows, tone) {
+  return '<div class="rounded-lg border border-slate-800 bg-slate-950/40 p-4">' +
+    '<div class="text-xs font-semibold uppercase tracking-wide ' + tone + '">' + title + '</div>' +
+    '<p class="mt-1 text-xs leading-relaxed text-slate-500">' + note + '</p>' +
+    '<dl class="mt-3 space-y-1 text-sm">' + rows.map((r) =>
+      '<div class="flex flex-wrap items-baseline justify-between gap-x-3">' +
+      '<dt class="text-slate-500">' + r[0] + '</dt>' +
+      '<dd class="font-mono ' + (r[2] || 'text-slate-200') + '">' + r[1] + '</dd></div>').join('') +
+    '</dl></div>';
 }
 
 function renderPlan(d) {
   const pos = d.net > 0;
-  const word = d.campaigns.length === 1 ? 'кампанию' : 'кампании';
+  const pilots = d.pilots || [];
+  const camps = d.campaigns || [];
+
+  // Разведка и финальный план считаются отдельно, потому что это разные решения
+  // агента. Контакты и деньги по ним складываются в итог точно; прирост — нет:
+  // движок засчитывает каждого абонента один раз, по лучшей для него кампании.
+  const pilotContacts = sumBy(pilots, 'contacts');
+  const pilotCost = sumBy(pilots, 'cost');
+  const pilotGross = sumBy(pilots, 'gross_lift');
+  const planContacts = sumBy(camps, 'contacts');
+  const planCost = sumBy(camps, 'cost');
+  const planGross = sumBy(camps, 'gross_lift');
+  const overlap = pilotGross + planGross - d.gross;
+
+  const dedupNote = Math.round(overlap) > 0
+    ? ' Абонента, попавшего и в пилот, и в кампанию, движок засчитывает один раз — ' +
+      'по лучшей для него кампании. Поэтому уникальных абонентов (' + fmt(d.unique_customers) +
+      ') меньше, чем контактов (' + fmt(d.contacts) + '), а сумма вкладов разведки и плана ' +
+      'превышает итоговый прирост на ' + fmt(overlap) + ' у.е. — это пересечение аудиторий.'
+    : '';
+
   $('#verdict').innerHTML =
-    '<p class="text-sm text-slate-400">Рекомендация на следующий месяц</p>' +
-    '<p class="mt-2 text-2xl font-semibold leading-snug">Запустить ' + d.campaigns.length +
-      ' ' + word + ' на ' + fmt(d.unique_customers) + ' абонентов</p>' +
+    '<p class="text-sm text-slate-400">Рекомендация агента</p>' +
+    '<p class="mt-2 text-xl font-semibold leading-snug sm:text-2xl">Сначала разведка: ' + d.n_pilots +
+      ' ' + plural(d.n_pilots, 'пилот', 'пилота', 'пилотов') + ' на ' + fmt(pilotContacts) +
+      ' контактов. Затем ' + camps.length + ' ' +
+      plural(camps.length, 'финальная кампания', 'финальные кампании', 'финальных кампаний') +
+      ' на ' + fmt(planContacts) + ' ' +
+      plural(planContacts, 'абонента', 'абонента', 'абонентов') + '.</p>' +
     '<p class="mt-2 text-lg ' + (pos ? 'text-emerald-400' : 'text-rose-400') + '">' +
-      'Ожидаемый прирост выручки: <span class="font-mono">' + (pos ? '+' : '') + fmt(d.net) +
+      'Ожидаемый прирост выручки: <span class="font-mono">' + sign(d.net) +
       '</span> у.е. <span class="text-sm text-slate-500">за вычетом затрат на связь</span></p>' +
-    '<p class="mt-2 text-sm text-slate-500">Решение собрано по ' + d.n_pilots +
-      ' пилотным замерам на реальной базе, расчёт занял ' + d.elapsed_s + ' с.</p>';
+    '<div class="mt-4 grid gap-3 sm:grid-cols-3">' +
+      breakdown('Разведка', 'Замеры на малых группах: агент проверяет гипотезы, в том числе те, ' +
+        'что история считает убыточными.', [
+        ['пилотов', fmt(d.n_pilots)],
+        ['контактов', fmt(pilotContacts)],
+        ['стоимость', fmt(pilotCost) + ' у.е.', 'text-slate-400'],
+        ['вклад в прирост', sign(pilotGross) + ' у.е.',
+         pilotGross > 0 ? 'text-emerald-400' : 'text-rose-400'],
+      ], 'text-sky-300') +
+      breakdown('Финальный план', 'Кампании, собранные по подтверждённым замерам. Это то, ' +
+        'что уходит в выгрузку CSV.', [
+        ['кампаний', fmt(camps.length)],
+        ['абонентов', fmt(planContacts)],
+        ['стоимость', fmt(planCost) + ' у.е.', 'text-slate-400'],
+        ['вклад в прирост', sign(planGross) + ' у.е.',
+         planGross > 0 ? 'text-emerald-400' : 'text-rose-400'],
+      ], 'text-violet-300') +
+      breakdown('Итог', 'Так результат считает движок оценки: пилоты и финальные кампании ' +
+        'вместе, одним расчётом.', [
+        ['контактов', fmt(d.contacts)],
+        ['уникальных абонентов', fmt(d.unique_customers)],
+        ['затраты', fmt(d.cost) + ' у.е.', 'text-slate-400'],
+        ['прирост до затрат', sign(d.gross) + ' у.е.',
+         d.gross > 0 ? 'text-emerald-400' : 'text-rose-400'],
+        ['чистыми', sign(d.net) + ' у.е.', pos ? 'text-emerald-400' : 'text-rose-400'],
+      ], 'text-emerald-300') +
+    '</div>' +
+    '<p class="mt-3 text-xs leading-relaxed text-slate-500">' +
+      'Пилотные контакты идут в зачёт наравне с финальными кампаниями: так устроена оценка ' +
+      'в кейсе, это не недочёт плана. Контакты и затраты по двум блокам складываются в итог ' +
+      'точно.' + dedupNote + '</p>' +
+    '<p class="mt-2 text-sm text-slate-500">Расчёт занял ' + d.elapsed_s + ' с.</p>';
 
   $('#money').innerHTML = [
-    card('Заработаем', (pos ? '+' : '') + fmt(d.net),
+    card('Заработаем', sign(d.net),
          d.growth_pct.toFixed(2) + '% к текущей выручке',
          pos ? 'text-emerald-400' : 'text-rose-400'),
     card('Потратим на связь', fmt(d.cost),
          d.budget_used_pct.toFixed(0) + '% бюджета в 100 000', 'text-slate-100'),
-    card('Затронем', fmt(d.unique_customers),
-         d.coverage_pct.toFixed(1) + '% базы, остальных не беспокоим', 'text-slate-100'),
+    card('Затронем абонентов', fmt(d.unique_customers),
+         d.coverage_pct.toFixed(1) + '% базы · вместе с теми, кого затронули только пилоты',
+         'text-slate-100'),
   ].join('');
   $('#money').classList.remove('hidden');
   $('#money').classList.add('grid');
 
   $('#plan').innerHTML = d.campaigns.map((c) => {
-    const ch = CHANNELS[c.channel] || [c.channel, 'bg-slate-700 text-slate-200'];
+    const ch = CHANNELS[c.channel] || [esc(c.channel), 'bg-slate-700 text-slate-200'];
     const segMatch = c.name.match(/^(LOW|MID|HIGH)/);
     const seg = segMatch ? segMatch[1] : null;
     const tgtMatch = c.name.match(/to_(tariff_\d+)/);
@@ -288,8 +370,8 @@ function renderPlan(d) {
     const part = c.name.indexOf('_part') >= 0 ? ' <span class="text-xs text-slate-500">' +
       '(остаток сегмента)</span>' : '';
     return '<tr>' +
-      '<td class="break-words py-2 pr-4">' + (SEG_RU[seg] || c.name) + part + '</td>' +
-      '<td class="py-2 pr-4 font-mono text-xs text-slate-400">' + target + '</td>' +
+      '<td class="break-words py-2 pr-4">' + esc(SEG_RU[seg] || c.name) + part + '</td>' +
+      '<td class="py-2 pr-4 font-mono text-xs text-slate-400">' + esc(target) + '</td>' +
       '<td class="py-2 pr-4"><span class="badge badge-sm whitespace-nowrap border-0 ' +
         ch[1] + '">' + ch[0] + '</span></td>' +
       '<td class="py-2 pr-4 text-right font-mono">' + fmt(c.contacts) + '</td>' +
@@ -301,34 +383,50 @@ function renderPlan(d) {
 
   const lines = (d.explanation || '').split('\n').filter(Boolean);
   $('#why').innerHTML = lines.map((l) =>
-    '<p class="break-words">' + l.replace(/\*\*(.+?)\*\*/g, '<b class="text-slate-100">$1</b>') + '</p>'
+    '<p class="break-words">' + esc(l).replace(/\*\*(.+?)\*\*/g, '<b class="text-slate-100">$1</b>') + '</p>'
   ).join('');
   $('#why-wrap').classList.toggle('hidden', lines.length === 0);
 
+  renderPilots(d.learning || []);
+  $('#chart-wrap').classList.remove('hidden');
+  renderLearning(d.learning || []);
+}
+
+function renderPilots(rows) {
+  // Показываем то, что НАБЛЮДАЛ агент, а не истинный эффект из модели среды:
+  // иначе цвет столбца не соответствовал бы принятому решению, и график
+  // объяснял бы решение неверно.
   if (chart) chart.destroy();
-  const values = d.pilots.map((p) => p.gross_lift);
+  if (!rows.length) { $('#chart-wrap').classList.add('hidden'); return; }
+  const observed = rows.map((r) => r.observed);
   chart = new Chart($('#pilots'), {
     type: 'bar',
     data: {
-      labels: d.pilots.map((_, i) => 'П' + (i + 1)),
+      labels: rows.map((r, i) => 'П' + (i + 1)),
       datasets: [{
-        data: values, borderRadius: 4,
-        backgroundColor: values.map((v) => v > 0 ? 'rgba(16,185,129,.75)' : 'rgba(244,63,94,.75)'),
+        data: observed, borderRadius: 4,
+        backgroundColor: rows.map((r) => r.accepted
+          ? 'rgba(16,185,129,.8)'                        // принята
+          : (r.observed > 0 ? 'rgba(148,163,184,.55)'    // плюс, но в пределах шума
+                            : 'rgba(244,63,94,.7)')),    // отрицательный эффект
       }],
     },
     options: {
       responsive: true, maintainAspectRatio: false,
-      plugins: { legend: { display: false },
-        tooltip: { callbacks: { label: (c) => fmt(c.raw) + ' у.е.' } } },
+      plugins: { legend: { display: false }, tooltip: { callbacks: { label: (c) => {
+        const r = rows[c.dataIndex];
+        return r.segment + ' ' + r.from_tariff + ' → ' + r.to_tariff +
+          ': наблюдение ' + r.observed.toFixed(3) + ' при шуме ±' + r.noise.toFixed(3) +
+          ' — ' + r.verdict;
+      } } } },
       scales: {
         x: { grid: { display: false }, ticks: { color: '#64748b', font: { size: 10 } } },
         y: { grid: { color: 'rgba(148,163,184,.12)' },
-             ticks: { color: '#64748b', callback: (v) => fmt(v) } },
+             ticks: { color: '#64748b', callback: (v) => v.toFixed(2) } },
       },
     },
   });
   $('#chart-wrap').classList.remove('hidden');
-  renderLearning(d.learning || []);
 }
 
 function renderLearning(rows) {
@@ -346,15 +444,15 @@ function renderLearning(rows) {
       ? ' <span class="badge badge-xs border-amber-700 text-amber-300">против приора</span>' : '';
     const sign = (v) => (v > 0 ? '+' : '') + v.toFixed(3);
     return '<tr class="' + (r.accepted ? '' : 'opacity-70') + '">' +
-      '<td class="py-1.5 pr-3 break-words"><span class="text-slate-300">' + r.segment + '</span> ' +
-        '<span class="font-mono text-xs text-slate-500">' + r.from_tariff + ' → ' +
-        r.to_tariff + '</span>' + mark + '</td>' +
+      '<td class="py-1.5 pr-3 break-words"><span class="text-slate-300">' + esc(r.segment) +
+        '</span> <span class="font-mono text-xs text-slate-500">' + esc(r.from_tariff) + ' → ' +
+        esc(r.to_tariff) + '</span>' + mark + '</td>' +
       '<td class="py-1.5 pr-3 text-right font-mono text-slate-400">' + fmt(r.group_size) + '</td>' +
       '<td class="py-1.5 pr-3 text-right font-mono text-slate-500">' + r.prior.toFixed(2) + '</td>' +
       '<td class="py-1.5 pr-3 text-right font-mono">' + sign(r.observed) +
         '<span class="text-xs text-slate-600"> n=' + r.pilot_n + '</span></td>' +
       '<td class="py-1.5 pr-3 text-right font-mono ' + tone + '">' + sign(r.estimate) + '</td>' +
-      '<td class="py-1.5 text-xs ' + tone + '">' + r.verdict + '</td></tr>';
+      '<td class="py-1.5 text-xs ' + tone + '">' + esc(r.verdict) + '</td></tr>';
   }).join('');
   $('#learn-wrap').classList.remove('hidden');
 }
@@ -365,23 +463,29 @@ async function loadSegments() {
     const d = await res.json();
     const skipped = d.segments.filter((s) => s.median_lift <= 0);
     const share = skipped.reduce((a, s) => a + s.share_pct, 0).toFixed(0);
+    // Важно не сказать «не трогаем»: агент резервирует часть пилотов ровно
+    // на эти сегменты и берёт их в план, если замер покажет прибыль.
     $('#skip-text').textContent =
-      'Смена тарифа не всем приносит пользу. По истории экономные абоненты после перехода ' +
-      'начинают платить заметно больше, а дорогие — меньше: они уходят на тариф выгоднее ' +
-      'прежнего. Поэтому ' + share + '% базы мы сознательно не трогаем: контакт с ними стоил ' +
-      'бы денег и снижал выручку.';
+      'Смена тарифа не всем приносит пользу. В истории датасета экономные абоненты после ' +
+      'перехода начинают платить заметно больше, а дорогие — меньше: они уходят на тариф ' +
+      'выгоднее прежнего. Поэтому ' + share + '% базы не попали в финальный план этого ' +
+      'прогона. Но вслепую мы их не списываем: часть пилотов агент заранее резервирует ' +
+      'именно на сегменты, которые история считает убыточными. Пилот каналом push ничего ' +
+      'не стоит, а если замер покажет прибыль — сегмент попадёт в план.';
     $('#segments').innerHTML = d.segments.map((s) => {
       const good = s.median_lift > 0;
       return '<div class="rounded-lg border ' + (good ? 'border-emerald-900' : 'border-rose-900') +
-        ' bg-slate-900 p-4"><div class="flex items-center justify-between gap-2">' +
-        '<span class="text-sm font-medium">' + SEG_RU[s.segment] + '</span>' +
+        ' bg-slate-900 p-4"><div class="flex flex-wrap items-center justify-between gap-2">' +
+        '<span class="text-sm font-medium">' + esc(SEG_RU[s.segment] || s.segment) + '</span>' +
         '<span class="rounded-md bg-slate-800 px-2 py-0.5 text-xs text-slate-400">' +
-          s.share_pct + '% базы</span></div>' +
+          esc(s.share_pct) + '% базы</span></div>' +
         '<div class="mt-2 font-mono text-2xl ' + (good ? 'text-emerald-400' : 'text-rose-400') +
           '">' + (good ? '+' : '') + (s.median_lift * 100).toFixed(0) + '%</div>' +
-        '<div class="mt-1 text-xs text-slate-500">так меняется их счёт после смены тарифа</div>' +
-        '<div class="mt-2 text-xs ' + (good ? 'text-emerald-500' : 'text-rose-500') + '">' +
-          (good ? 'работаем' : 'не трогаем') + '</div></div>';
+        '<div class="mt-1 text-xs text-slate-500">так менялся их счёт после смены тарифа ' +
+          'в истории датасета</div>' +
+        '<div class="mt-2 text-xs ' + (good ? 'text-emerald-500' : 'text-amber-400') + '">' +
+          (good ? 'проверяем пилотом, при подтверждении берём в план' :
+                  'история против — всё равно проверяем пилотом') + '</div></div>';
     }).join('');
     $('#skip-wrap').classList.remove('hidden');
   } catch (e) {
@@ -401,7 +505,7 @@ async function run() {
     if (!res.ok) throw new Error('HTTP ' + res.status);
     renderPlan(await res.json());
   } catch (e) {
-    $('#verdict').innerHTML = '<p class="text-sm text-rose-400">Ошибка: ' + e.message + '</p>';
+    $('#verdict').innerHTML = '<p class="text-sm text-rose-400">Ошибка: ' + esc(e.message) + '</p>';
   } finally {
     btn.disabled = false;
     btn.textContent = 'Пересобрать план';
@@ -432,10 +536,10 @@ async function ask() {
       body: JSON.stringify({ question: q, seed: SEED }),
     });
     const d = await res.json();
-    $('#answer').innerHTML = '<p class="break-words">' + d.answer + '</p>' +
-      (d.model ? '<p class="mt-2 text-xs text-slate-600">модель: ' + d.model + '</p>' : '');
+    $('#answer').innerHTML = '<p class="break-words whitespace-pre-line">' + esc(d.answer) + '</p>' +
+      (d.model ? '<p class="mt-2 text-xs text-slate-600">модель: ' + esc(d.model) + '</p>' : '');
   } catch (e) {
-    $('#answer').textContent = 'Ошибка: ' + e.message;
+    $('#answer').textContent = 'Ошибка: ' + esc(e.message);
   } finally {
     btn.disabled = false;
     btn.textContent = 'Спросить';
@@ -448,7 +552,7 @@ async function whatif(budget) {
   try {
     const d = await (await fetch('/api/whatif?budget=' + budget)).json();
     const chans = Object.keys(d.channels).map((k) =>
-      (CHANNELS[k] ? CHANNELS[k][0] : k) + ' ×' + d.channels[k]).join(', ');
+      (CHANNELS[k] ? CHANNELS[k][0] : esc(k)) + ' ×' + esc(d.channels[k])).join(', ');
     wifRows[budget] =
       '<tr><td class="py-2 pr-4 font-mono">' + fmt(d.budget) + '</td>' +
       '<td class="py-2 pr-4 text-right font-mono text-emerald-400">+' + fmt(d.net) + '</td>' +
@@ -460,7 +564,7 @@ async function whatif(budget) {
     $('#wif-out').classList.remove('hidden');
   } catch (e) {
     $('#wif-rows').innerHTML = '<tr><td colspan="5" class="py-2 text-rose-400">Ошибка: ' +
-      e.message + '</td></tr>';
+      esc(e.message) + '</td></tr>';
     $('#wif-out').classList.remove('hidden');
   } finally {
     btns.forEach((b) => b.disabled = false);
@@ -509,7 +613,7 @@ async function stability() {
     });
     $('#stab-wrap').classList.remove('hidden');
   } catch (e) {
-    $('#stab-summary').innerHTML = '<span class="text-rose-400">Ошибка: ' + e.message + '</span>';
+    $('#stab-summary').innerHTML = '<span class="text-rose-400">Ошибка: ' + esc(e.message) + '</span>';
     $('#stab-wrap').classList.remove('hidden');
   } finally {
     btn.disabled = false;
@@ -535,23 +639,23 @@ async function scenarios() {
       const pos = w.net > 0;
       const pct = Math.max(2, Math.round((Math.abs(w.net) / max) * 100));
       const eff = Object.keys(w.effects).map((k) =>
-        k + ' ' + (w.effects[k] > 0 ? '+' : '') + w.effects[k]).join(' · ');
+        esc(k) + ' ' + (w.effects[k] > 0 ? '+' : '') + esc(w.effects[k])).join(' · ');
       return '<div class="rounded-lg border border-slate-800 bg-slate-900 p-3">' +
         '<div class="flex flex-wrap items-baseline justify-between gap-2">' +
-        '<span class="text-sm font-medium">' + w.name + '</span>' +
+        '<span class="text-sm font-medium">' + esc(w.name) + '</span>' +
         '<span class="font-mono text-sm ' + (pos ? 'text-emerald-400' : 'text-rose-400') + '">' +
           (pos ? '+' : '') + fmt(w.net) + '</span></div>' +
         '<div class="mt-2 h-1.5 overflow-hidden rounded-full bg-slate-800">' +
         '<div class="h-full rounded-full ' + (pos ? 'bg-emerald-500' : 'bg-rose-500') +
           ' w-[' + pct + '%]"></div></div>' +
         '<div class="mt-2 flex flex-wrap items-center gap-x-3 gap-y-1 text-xs text-slate-500">' +
-        '<span>эффект: ' + eff + '</span><span>ожидаем: ' + w.expect + '</span>' +
-        '<span>кампаний ' + w.campaigns + ' · пилотов ' + w.pilots + '</span>' +
+        '<span>эффект: ' + eff + '</span><span>ожидаем: ' + esc(w.expect) + '</span>' +
+        '<span>кампаний ' + esc(w.campaigns) + ' · пилотов ' + esc(w.pilots) + '</span>' +
         '<span class="' + (w.ok ? 'text-emerald-500' : 'text-rose-500') + '">' +
           (w.ok ? 'ok' : 'ПРОВАЛ') + '</span></div></div>';
     }).join('');
   } catch (e) {
-    $('#scen-list').innerHTML = '<p class="text-sm text-rose-400">Ошибка: ' + e.message + '</p>';
+    $('#scen-list').innerHTML = '<p class="text-sm text-rose-400">Ошибка: ' + esc(e.message) + '</p>';
   } finally {
     btn.disabled = false;
     btn.textContent = 'А если данные другие? · 6 миров';
@@ -577,13 +681,14 @@ async function compare() {
       '<div class="mt-2 text-xs text-slate-500">' + note + '</div></div>';
     $('#strat').innerHTML =
       card2('Переносим вывод на сегмент', d.transfer,
-        'Подтверждённое на части тарифов применяем ко всему сегменту, кроме заведомо убыточных. Плюс ' +
-        d.delta_pct + '% к результату.', true) +
+        'Подтверждённое на части тарифов применяем к непроверенным тарифам того же сегмента — ' +
+        'но только если вывод не получен вопреки приору. Плюс ' +
+        esc(d.delta_pct) + '% к результату.', true) +
       card2('Только измеренные группы', d.measured_only,
         'Действуем строго по проверенным группам. Безопаснее, но охват заметно меньше.', false);
     $('#strat-wrap').classList.remove('hidden');
   } catch (e) {
-    $('#strat').innerHTML = '<p class="text-sm text-rose-400">Ошибка: ' + e.message + '</p>';
+    $('#strat').innerHTML = '<p class="text-sm text-rose-400">Ошибка: ' + esc(e.message) + '</p>';
     $('#strat-wrap').classList.remove('hidden');
   } finally {
     btn.disabled = false;

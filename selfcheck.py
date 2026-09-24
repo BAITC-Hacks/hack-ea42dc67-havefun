@@ -46,24 +46,42 @@ def main() -> int:
     check(len(env.pilot_history) > 0, "агент действительно пилотировал",
           f"{len(env.pilot_history)} пилотов")
 
-    print("" + chr(10) + "=== 3. Запланированный охват совпадает с фактическим ===")
+    print("" + chr(10) + "=== 3. Охват по фильтрам плана совпадает с зачтённым ===")
     import contextlib
     import io as _io
 
     from local_eval import evaluate_agent
+    from scoring_core import apply_filters
 
-    env5, _ = make_mock_env(seed=5)
-    with contextlib.redirect_stdout(_io.StringIO()):
-        plan5 = A.Agent().act(env5)
-        res5 = evaluate_agent(A.Agent(), seed=5, verbose=False)
-    names = set(c["campaign_name"] for c in plan5)
-    actual = dict((c["name"], c["n_contacts"]) for c in res5["campaigns_detail"]
-                  if not c["name"].startswith("pilot_"))
-    check(set(actual) == names,
-          "среда не отбросила ни одной кампании плана",
-          "в плане %d, в зачёте %d" % (len(names), len(actual)))
-    check(all(not c.get("capped_at_money_budget") for c in res5["campaigns_detail"]),
-          "ни одна кампания не обрезана нехваткой бюджета")
+    # Агент отдаёт план уже без поля reach, поэтому сравнить с его внутренним
+    # числом нельзя. Сравниваем то, что проверяемо: сколько абонентов выбирают
+    # фильтры кампании из профиля — и сколько контактов эта же кампания
+    # получила в зачёте. Расхождение означало бы молчаливое обрезание.
+    for seed in (5, 11, 23):
+        env_s, _ = make_mock_env(seed=seed)
+        with contextlib.redirect_stdout(_io.StringIO()):
+            plan_s = A.Agent().act(env_s)
+            res_s = evaluate_agent(A.Agent(), seed=seed, verbose=False)
+        profile_s = env_s.customer_profile
+        actual = dict((c["name"], c["n_contacts"]) for c in res_s["campaigns_detail"]
+                      if not c["name"].startswith("pilot_"))
+        planned = dict((c["campaign_name"], len(apply_filters(profile_s, c))) for c in plan_s)
+
+        check(set(actual) == set(planned),
+              "seed %d: среда не отбросила ни одной кампании плана" % seed,
+              "в плане %d, в зачёте %d" % (len(planned), len(actual)))
+        diff = [n for n in planned if actual.get(n) != planned[n]]
+        check(not diff,
+              "seed %d: контактов в зачёте столько же, сколько абонентов под фильтрами" % seed,
+              "по фильтрам %d, в зачёте %d%s" % (
+                  sum(planned.values()), sum(actual.values()),
+                  "" if not diff else ", расходятся: " + ", ".join(diff[:3])))
+        capped = [c["name"] for c in res_s["campaigns_detail"]
+                  if c.get("capped_at_money_budget") or c.get("capped_at_reach_budget")
+                  or c.get("capped_at_campaign_limit")]
+        check(not capped,
+              "seed %d: ни одна кампания не обрезана лимитом" % seed,
+              "обрезаны: " + ", ".join(capped) if capped else "")
 
     print("\n=== 4. Некорректные входные данные ===")
     env2, _ = make_mock_env(seed=1)
