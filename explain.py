@@ -102,12 +102,11 @@ def call_model(client, model: str, system: str, user: str) -> str:
 def _pick_model(client) -> str | None:
     """Выбирает модель из доступных на аккаунте по порядку предпочтения."""
     global _resolved_model
-    if _resolved_model:
-        return _resolved_model
     forced = os.environ.get("OPENAI_MODEL")
     if forced:
-        _resolved_model = forced
         return forced
+    if _resolved_model:
+        return _resolved_model
     try:
         available = {m.id for m in client.models.list()}
     except Exception as exc:  # noqa: BLE001 — список моделей может быть закрыт
